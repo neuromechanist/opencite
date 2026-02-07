@@ -59,11 +59,26 @@ opencite pdf 10.1038/nature12345 -o papers/
 
 ## Configuration
 
-Set API keys in a `.env` file or as environment variables:
+OpenCite needs API keys for the academic databases. You have two options:
 
+**Option 1: Environment variables** (recommended for general use)
+
+Add to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+
+```bash
+export SEMANTIC_SCHOLAR_API_KEY=your_key
+export PUBMED_API_KEY=your_key
+export OPENALEX_API_KEY=your_key
+export MISTRAL_API_KEY=your_key   # optional, for PDF-to-markdown via Mistral OCR
 ```
-SEMANTIC_SCHOLAR_API_KEY=your_key
-PUBMED_API_KEY=your_key
-OPENALEX_API_KEY=your_key
-MISTRAL_API_KEY=your_key          # for PDF-to-markdown via Mistral OCR
+
+**Option 2: `.env` file** (convenient for development)
+
+Copy the template and fill in your keys:
+
+```bash
+cp .env.example .env
+# edit .env with your keys
 ```
+
+OpenCite looks for `.env` in the current working directory.

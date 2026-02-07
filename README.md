@@ -7,14 +7,36 @@ Searches Semantic Scholar, OpenAlex, and PubMed in parallel, deduplicates result
 ## Installation
 
 ```bash
-uv pip install -e .
+pip install opencite
 ```
 
 With PDF conversion support:
 
 ```bash
-uv pip install -e ".[convert]"
+pip install opencite[convert]
 ```
+
+For development:
+
+```bash
+git clone https://github.com/neuromechanist/opencite.git
+cd opencite
+uv sync --extra dev
+```
+
+## Claude Code Plugin
+
+OpenCite is available as a [Claude Code](https://claude.ai/code) plugin, giving Claude direct access to academic literature search and citation management.
+
+To install:
+
+1. Open Claude Code
+2. Type `/plugin` and press Enter
+3. Select "Add marketplace"
+4. Enter `neuromechanist/opencite`
+5. Restart Claude Code
+
+Once installed, use `/opencite` or ask Claude to search for papers, look up DOIs, get BibTeX, etc.
 
 ## Quick Start
 

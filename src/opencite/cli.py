@@ -166,6 +166,9 @@ def main() -> int:
     dispatch = {
         "search": _cmd_search,
         "lookup": _cmd_lookup,
+        "cite": _cmd_cite,
+        "canonical": _cmd_canonical,
+        "ids": _cmd_ids,
     }
 
     handler = dispatch.get(args.command)
@@ -247,6 +250,96 @@ async def _cmd_lookup(args: argparse.Namespace, config: object) -> int:
     formatter = get_formatter(args.format)
     output = formatter.format_papers(papers, verbose=args.verbose)
     _write_output(output, args.output)
+    return 0
+
+
+async def _cmd_cite(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'cite' subcommand."""
+    from opencite.citations import CitationExplorer
+    from opencite.config import Config
+    from opencite.formatters import get_formatter
+
+    assert isinstance(config, Config)
+
+    async with CitationExplorer(config) as explorer:
+        if args.direction == "both":
+            citing = await explorer.citing_papers(
+                args.id, max_results=args.max, sort=args.sort,
+                min_citations=args.min_citations,
+            )
+            refs = await explorer.references(args.id, max_results=args.max)
+            papers = citing.papers + refs.papers
+        elif args.direction == "references":
+            result = await explorer.references(args.id, max_results=args.max)
+            papers = result.papers
+        else:
+            result = await explorer.citing_papers(
+                args.id, max_results=args.max, sort=args.sort,
+                min_citations=args.min_citations,
+            )
+            papers = result.papers
+
+    formatter = get_formatter(args.format)
+    output = formatter.format_papers(papers, verbose=args.verbose)
+    _write_output(output, args.output)
+    return 0
+
+
+async def _cmd_canonical(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'canonical' subcommand."""
+    from opencite.citations import CitationExplorer
+    from opencite.config import Config
+    from opencite.formatters import get_formatter
+
+    assert isinstance(config, Config)
+
+    async with CitationExplorer(config) as explorer:
+        papers = await explorer.canonical_papers(
+            query=args.query,
+            max_results=args.max,
+            year_from=args.year_from,
+            min_citations=args.min_citations,
+        )
+
+    formatter = get_formatter(args.format)
+    output = formatter.format_papers(papers, verbose=args.verbose)
+    _write_output(output, args.output)
+    return 0
+
+
+async def _cmd_ids(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'ids' subcommand."""
+    import json
+
+    from opencite.clients.id_converter import IDConverterClient
+    from opencite.config import Config
+
+    assert isinstance(config, Config)
+
+    async with IDConverterClient(config) as converter:
+        id_sets = await converter.convert(args.id)
+
+    if not id_sets:
+        print("No IDs could be resolved.", file=sys.stderr)
+        return 1
+
+    if args.format == "json":
+        data = [
+            {"doi": ids.doi, "pmid": ids.pmid, "pmcid": ids.pmcid}
+            for ids in id_sets
+        ]
+        print(json.dumps(data, indent=2))
+    else:
+        for ids in id_sets:
+            parts = []
+            if ids.doi:
+                parts.append(f"DOI: {ids.doi}")
+            if ids.pmid:
+                parts.append(f"PMID: {ids.pmid}")
+            if ids.pmcid:
+                parts.append(f"PMCID: {ids.pmcid}")
+            print(" | ".join(parts))
+
     return 0
 
 

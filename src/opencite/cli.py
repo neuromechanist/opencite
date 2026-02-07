@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 
 from opencite import __version__
@@ -153,6 +154,108 @@ def main() -> int:
         parser.print_help()
         return 0
 
-    # Commands will be dispatched here in Phase 4
-    print(f"Command '{args.command}' not yet implemented.", file=sys.stderr)
-    return 1
+    from opencite.config import Config
+
+    config = Config.from_env()
+
+    if args.debug:
+        config = Config.from_env()
+        config.log_level = "DEBUG"
+    config.setup_logging()
+
+    dispatch = {
+        "search": _cmd_search,
+        "lookup": _cmd_lookup,
+    }
+
+    handler = dispatch.get(args.command)
+    if handler is None:
+        print(f"Command '{args.command}' not yet implemented.", file=sys.stderr)
+        return 1
+
+    try:
+        return asyncio.run(handler(args, config))
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        if args.debug:
+            raise
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+
+async def _cmd_search(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'search' subcommand."""
+    from opencite.config import Config
+    from opencite.formatters import get_formatter
+    from opencite.search import SearchOrchestrator
+
+    assert isinstance(config, Config)
+
+    sources = None
+    if args.source != "all":
+        sources = [args.source]
+
+    async with SearchOrchestrator(config) as searcher:
+        result = await searcher.search(
+            query=args.query,
+            max_results=args.max,
+            sources=sources,
+            year_from=args.year_from,
+            year_to=args.year_to,
+            oa_only=args.oa_only,
+            sort=args.sort,
+        )
+
+    formatter = get_formatter(args.format)
+    output = formatter.format_papers(result.papers, verbose=args.verbose)
+
+    if not args.quiet and args.format == "text":
+        dedup_msg = ""
+        if result.deduplicated_count > 0:
+            dedup_msg = f" ({result.deduplicated_count} duplicates removed)"
+        source_info = ", ".join(
+            f"{k}: {v}" for k, v in sorted(result.total_by_source.items())
+        )
+        print(f"Sources: {source_info}{dedup_msg}", file=sys.stderr)
+
+    _write_output(output, args.output)
+    return 0
+
+
+async def _cmd_lookup(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'lookup' subcommand."""
+    from opencite.config import Config
+    from opencite.formatters import get_formatter
+    from opencite.search import SearchOrchestrator
+
+    assert isinstance(config, Config)
+
+    async with SearchOrchestrator(config) as searcher:
+        if len(args.id) == 1:
+            paper = await searcher.lookup(args.id[0], enrich=args.enrich)
+            if paper is None:
+                print(f"Paper not found: {args.id[0]}", file=sys.stderr)
+                return 1
+            papers = [paper]
+        else:
+            papers = await searcher.batch_lookup(args.id, enrich=args.enrich)
+            if not papers:
+                print("No papers found.", file=sys.stderr)
+                return 1
+
+    formatter = get_formatter(args.format)
+    output = formatter.format_papers(papers, verbose=args.verbose)
+    _write_output(output, args.output)
+    return 0
+
+
+def _write_output(output: str, filepath: str | None) -> None:
+    """Write output to file or stdout."""
+    if filepath:
+        with open(filepath, "w") as f:
+            f.write(output)
+            f.write("\n")
+        print(f"Output written to {filepath}", file=sys.stderr)
+    else:
+        print(output)

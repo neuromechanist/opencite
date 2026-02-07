@@ -169,6 +169,8 @@ def main() -> int:
         "cite": _cmd_cite,
         "canonical": _cmd_canonical,
         "ids": _cmd_ids,
+        "pdf": _cmd_pdf,
+        "convert": _cmd_convert,
     }
 
     handler = dispatch.get(args.command)
@@ -352,6 +354,51 @@ async def _cmd_ids(args: argparse.Namespace, config: object) -> int:
             if ids.pmcid:
                 parts.append(f"PMCID: {ids.pmcid}")
             print(" | ".join(parts))
+
+    return 0
+
+
+async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'pdf' subcommand."""
+    from opencite.config import Config
+    from opencite.pdf import PDFRetriever
+
+    assert isinstance(config, Config)
+
+    async with PDFRetriever(config) as retriever:
+        path = await retriever.download(
+            identifier=args.id,
+            output_dir=args.output_dir,
+            filename=args.filename,
+        )
+
+    if path is None:
+        print("Could not download PDF.", file=sys.stderr)
+        return 1
+
+    print(f"Downloaded: {path}", file=sys.stderr)
+
+    if args.convert:
+        from opencite.convert import convert_pdf
+
+        md_out = path.with_suffix(".md")
+        convert_pdf(str(path), output_path=str(md_out), converter=args.converter)
+        print(f"Converted: {md_out}", file=sys.stderr)
+
+    return 0
+
+
+async def _cmd_convert(args: argparse.Namespace, config: object) -> int:  # noqa: ARG001
+    """Handle the 'convert' subcommand."""
+    from opencite.convert import convert_pdf
+
+    output_path = args.output
+    md_text = convert_pdf(args.file, output_path=output_path, converter=args.converter)
+
+    if not output_path:
+        print(md_text)
+    else:
+        print(f"Converted: {output_path}", file=sys.stderr)
 
     return 0
 

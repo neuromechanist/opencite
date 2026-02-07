@@ -250,6 +250,19 @@ async def _cmd_lookup(args: argparse.Namespace, config: object) -> int:
     formatter = get_formatter(args.format)
     output = formatter.format_papers(papers, verbose=args.verbose)
     _write_output(output, args.output)
+
+    if args.append_bib:
+        from opencite.bibtex import generate_bibtex
+
+        entries = []
+        for p in papers:
+            entries.append(p._bibtex if p._bibtex else generate_bibtex(p))
+        with open(args.append_bib, "a") as f:
+            f.write("\n\n")
+            f.write("\n\n".join(entries))
+            f.write("\n")
+        print(f"BibTeX appended to {args.append_bib}", file=sys.stderr)
+
     return 0
 
 

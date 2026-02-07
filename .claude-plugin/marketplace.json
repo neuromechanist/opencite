@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "neuromechanist-opencite",
+  "description": "Academic literature search, citation management, and PDF retrieval using the opencite CLI",
+  "owner": {
+    "name": "Seyed Yahya Shirazi",
+    "email": "shirazi@ieee.org"
+  },
+  "plugins": [
+    {
+      "name": "opencite",
+      "description": "Academic literature search, citation management, and PDF retrieval using the opencite CLI",
+      "version": "0.1.0",
+      "author": {
+        "name": "Seyed Yahya Shirazi",
+        "email": "shirazi@ieee.org"
+      },
+      "source": ".",
+      "category": "development",
+      "homepage": "https://github.com/neuromechanist/opencite"
+    }
+  ]
+}

@@ -133,8 +133,16 @@ def create_parser() -> argparse.ArgumentParser:
     )
     convert_p.add_argument(
         "--converter",
-        choices=["markitdown", "mistral"],
-        default="markitdown",
+        choices=["markitdown", "mistral", "auto"],
+        default="auto",
+    )
+    convert_p.add_argument(
+        "--extract-images",
+        action="store_true",
+        help="extract images from PDF (mistral only)",
+    )
+    convert_p.add_argument(
+        "--images-dir", metavar="DIR", help="directory for extracted images"
     )
 
     # -- ids --
@@ -396,18 +404,33 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
         from opencite.convert import convert_pdf
 
         md_out = path.with_suffix(".md")
-        convert_pdf(str(path), output_path=str(md_out), converter=args.converter)
+        convert_pdf(
+            str(path),
+            output_path=str(md_out),
+            converter=args.converter,
+            mistral_api_key=config.mistral_api_key,
+        )
         print(f"Converted: {md_out}", file=sys.stderr)
 
     return 0
 
 
-async def _cmd_convert(args: argparse.Namespace, config: object) -> int:  # noqa: ARG001
+async def _cmd_convert(args: argparse.Namespace, config: object) -> int:
     """Handle the 'convert' subcommand."""
+    from opencite.config import Config
     from opencite.convert import convert_pdf
 
+    assert isinstance(config, Config)
+
     output_path = args.output
-    md_text = convert_pdf(args.file, output_path=output_path, converter=args.converter)
+    md_text = convert_pdf(
+        args.file,
+        output_path=output_path,
+        converter=args.converter,
+        extract_images=args.extract_images,
+        images_dir=getattr(args, "images_dir", None),
+        mistral_api_key=config.mistral_api_key,
+    )
 
     if not output_path:
         print(md_text)

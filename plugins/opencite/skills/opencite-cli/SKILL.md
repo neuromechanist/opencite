@@ -11,9 +11,13 @@ OpenCite is a CLI tool and Python library for academic literature search and cit
 ## Installation
 
 ```bash
-uv sync                    # basic install
-uv sync --extra convert    # with PDF conversion support (markitdown + markit-mistral)
-uv sync --extra dev        # with dev tools
+uv tool install opencite                # install globally, use with `uvx opencite` or `opencite`
+uv tool install 'opencite[convert]'     # with PDF conversion support (markitdown + markit-mistral)
+```
+
+For development:
+```bash
+uv sync --extra dev        # install from source with dev tools
 ```
 
 ## Configuration
@@ -21,9 +25,9 @@ uv sync --extra dev        # with dev tools
 opencite supports TOML config, `.env` files, and environment variables.
 
 ```bash
-uv run opencite config init   # creates ~/.opencite/config.toml template
-uv run opencite config show   # display resolved config (keys masked)
-uv run opencite config path   # show config file location
+uvx opencite config init   # creates ~/.opencite/config.toml template
+uvx opencite config show   # display resolved config (keys masked)
+uvx opencite config path   # show config file location
 ```
 
 Config loading priority (later overrides earlier):
@@ -50,7 +54,7 @@ Config loading priority (later overrides earlier):
 ### search - Find papers
 
 ```bash
-uv run opencite search "query string" [options]
+uvx opencite search "query string" [options]
 ```
 
 Options:
@@ -67,7 +71,7 @@ Options:
 ### lookup - Look up a paper
 
 ```bash
-uv run opencite lookup IDENTIFIER [IDENTIFIER ...] [options]
+uvx opencite lookup IDENTIFIER [IDENTIFIER ...] [options]
 ```
 
 Accepts DOI, `pmid:X`, `pmc:X`, `arxiv:X`, S2 ID, or OpenAlex ID. Auto-detects the type. Supports multiple IDs.
@@ -82,7 +86,7 @@ Options:
 ### cite - Citation graph
 
 ```bash
-uv run opencite cite IDENTIFIER [options]
+uvx opencite cite IDENTIFIER [options]
 ```
 
 Options:
@@ -97,7 +101,7 @@ Options:
 ### canonical - Most-cited papers
 
 ```bash
-uv run opencite canonical "topic" [options]
+uvx opencite canonical "topic" [options]
 ```
 
 Finds the most-cited, foundational papers for a topic.
@@ -113,7 +117,7 @@ Options:
 ### pdf - Download PDF
 
 ```bash
-uv run opencite pdf IDENTIFIER [options]
+uvx opencite pdf IDENTIFIER [options]
 ```
 
 Tries multiple sources in priority order: publisher APIs (if tokens configured), OpenAlex/S2 PDF locations, PMC Open Access, DOI content negotiation.
@@ -127,7 +131,7 @@ Options:
 ### convert - PDF to markdown
 
 ```bash
-uv run opencite convert FILE.pdf [options]
+uvx opencite convert FILE.pdf [options]
 ```
 
 Uses markitdown (free, local) by default. If `MISTRAL_API_KEY` is set, auto mode selects markit-mistral for better math/complex layout handling.
@@ -141,7 +145,7 @@ Options:
 ### ids - Convert identifiers
 
 ```bash
-uv run opencite ids IDENTIFIER [IDENTIFIER ...] [options]
+uvx opencite ids IDENTIFIER [IDENTIFIER ...] [options]
 ```
 
 Converts between DOI, PMID, and PMCID using the NCBI ID Converter API.
@@ -152,9 +156,9 @@ Options:
 ### batch-fetch - Batch download PDFs
 
 ```bash
-uv run opencite batch-fetch FILE [options]
-uv run opencite batch-fetch --from-json FILE [options]
-uv run opencite batch-fetch --from-stdin [options]
+uvx opencite batch-fetch FILE [options]
+uvx opencite batch-fetch --from-json FILE [options]
+uvx opencite batch-fetch --from-stdin [options]
 ```
 
 Downloads PDFs for multiple papers with controlled concurrency.
@@ -174,9 +178,9 @@ Options:
 ### config - Manage configuration
 
 ```bash
-uv run opencite config init   # create ~/.opencite/config.toml template
-uv run opencite config show   # display resolved config (keys masked)
-uv run opencite config path   # show config file location
+uvx opencite config init   # create ~/.opencite/config.toml template
+uvx opencite config show   # display resolved config (keys masked)
+uvx opencite config path   # show config file location
 ```
 
 ## Common Workflows
@@ -184,52 +188,52 @@ uv run opencite config path   # show config file location
 ### Literature review: search, filter, export
 ```bash
 # Search broadly
-uv run opencite search "motor cortex oscillations" --max 20 -f json -o results.json
+uvx opencite search "motor cortex oscillations" --max 20 -f json -o results.json
 
 # Export BibTeX for citation manager
-uv run opencite search "motor cortex oscillations" --max 20 -f bibtex -o refs.bib
+uvx opencite search "motor cortex oscillations" --max 20 -f bibtex -o refs.bib
 ```
 
 ### Deep-dive on a paper's impact
 ```bash
 # Look up the paper
-uv run opencite lookup "10.1038/s41586-024-07487-w" -v
+uvx opencite lookup "10.1038/s41586-024-07487-w" -v
 
 # Get papers that cite it
-uv run opencite cite "10.1038/s41586-024-07487-w" --direction citing --max 20
+uvx opencite cite "10.1038/s41586-024-07487-w" --direction citing --max 20
 
 # Get its references
-uv run opencite cite "10.1038/s41586-024-07487-w" --direction references --max 20
+uvx opencite cite "10.1038/s41586-024-07487-w" --direction references --max 20
 ```
 
 ### Find foundational papers and download
 ```bash
 # Find canonical papers
-uv run opencite canonical "attention mechanism" --max 5
+uvx opencite canonical "attention mechanism" --max 5
 
 # Download and convert in one step
-uv run opencite pdf "10.1234/example" -o attention.pdf --convert
+uvx opencite pdf "10.1234/example" -o attention.pdf --convert
 ```
 
 ### Batch workflow: search then download all
 ```bash
 # Search and save results as JSON
-uv run opencite search "tDCS motor cortex" --max 30 -f json -o results.json
+uvx opencite search "tDCS motor cortex" --max 30 -f json -o results.json
 
 # Batch download all PDFs with conversion
-uv run opencite batch-fetch --from-json results.json --convert --summary report.json -o ./papers
+uvx opencite batch-fetch --from-json results.json --convert --summary report.json -o ./papers
 
 # Or from a simple text file of DOIs
-uv run opencite batch-fetch dois.txt --convert -o ./papers
+uvx opencite batch-fetch dois.txt --convert -o ./papers
 ```
 
 ### Cross-reference identifier conversion
 ```bash
 # Single ID
-uv run opencite ids "10.1001/jama.2024.12345"
+uvx opencite ids "10.1001/jama.2024.12345"
 
 # Multiple IDs with JSON output
-uv run opencite ids "10.1001/jama.2024.12345" "PMC7654321" -f json
+uvx opencite ids "10.1001/jama.2024.12345" "PMC7654321" -f json
 ```
 
 ## Error Handling

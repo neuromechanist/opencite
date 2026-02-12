@@ -13,10 +13,10 @@ You are helping the user run opencite commands for academic literature search an
 First, verify opencite is installed:
 
 ```bash
-uv run opencite --version
+uvx opencite --version
 ```
 
-If not installed, run `uv sync` in the opencite project directory.
+If not installed, run `uv tool install opencite` or `pip install opencite`.
 
 ## Routing
 
@@ -36,47 +36,47 @@ Based on the user's request, determine which subcommand to use:
 
 ### Search and export BibTeX
 ```bash
-uv run opencite search "neural oscillations" -f bibtex -o refs.bib
+uvx opencite search "neural oscillations" -f bibtex -o refs.bib
 ```
 
 ### Look up by DOI
 ```bash
-uv run opencite lookup "10.1038/s41586-024-07487-w"
+uvx opencite lookup "10.1038/s41586-024-07487-w"
 ```
 
 ### Citation graph
 ```bash
-uv run opencite cite "10.1038/s41586-024-07487-w" --direction both
+uvx opencite cite "10.1038/s41586-024-07487-w" --direction both
 ```
 
 ### Find canonical papers
 ```bash
-uv run opencite canonical "transformer architecture" --max 10
+uvx opencite canonical "transformer architecture" --max 10
 ```
 
 ### Download PDF and convert
 ```bash
-uv run opencite pdf "10.1038/s41586-024-07487-w" -o paper.pdf --convert
-uv run opencite convert paper.pdf -o paper.md --converter auto
+uvx opencite pdf "10.1038/s41586-024-07487-w" -o paper.pdf --convert
+uvx opencite convert paper.pdf -o paper.md --converter auto
 ```
 
 ### Batch download with conversion
 ```bash
-uv run opencite batch-fetch dois.txt --convert --summary report.json
-uv run opencite search "tDCS" -f json -o results.json
-uv run opencite batch-fetch --from-json results.json --convert -o ./papers
+uvx opencite batch-fetch dois.txt --convert --summary report.json
+uvx opencite search "tDCS" -f json -o results.json
+uvx opencite batch-fetch --from-json results.json --convert -o ./papers
 ```
 
 ### Convert IDs
 ```bash
-uv run opencite ids "10.1038/s41586-024-07487-w" -f json
+uvx opencite ids "10.1038/s41586-024-07487-w" -f json
 ```
 
 ### Configure API keys
 ```bash
-uv run opencite config init   # creates ~/.opencite/config.toml template
-uv run opencite config show   # display resolved config (keys masked)
-uv run opencite config path   # show config file location
+uvx opencite config init   # creates ~/.opencite/config.toml template
+uvx opencite config show   # display resolved config (keys masked)
+uvx opencite config path   # show config file location
 ```
 
 ## Output Formats

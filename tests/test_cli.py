@@ -147,7 +147,7 @@ class TestCLIArgParsing:
         )
         assert args.command == "pdf"
         assert args.id == "10.1234/test"
-        assert args.output_dir == "/tmp/papers"
+        assert args.output == "/tmp/papers"
         assert args.convert is True
         assert args.converter == "mistral"
 

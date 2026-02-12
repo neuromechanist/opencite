@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import pytest
 
+from opencite.config import Config
 from opencite.models import Author, IDSet, Paper, PDFLocation
-from opencite.pdf import PDFRetriever
+from opencite.pdf import _PUBLISHER_MAP, PDFRetriever
 
 
 class TestCollectUrls:
+    def _make_retriever(self, **config_kwargs):
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever.config = Config(**config_kwargs)
+        return retriever
+
     def test_pdf_locations_first(self):
         paper = Paper(
             title="Test",
@@ -17,7 +23,7 @@ class TestCollectUrls:
                 PDFLocation(url="https://example.com/paper.pdf", source="s2"),
             ],
         )
-        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever = self._make_retriever()
         urls = retriever._collect_urls(paper, "10.1234/test")
         assert urls[0] == "https://example.com/paper.pdf"
 
@@ -26,7 +32,7 @@ class TestCollectUrls:
             title="Test",
             ids=IDSet(pmcid="PMC12345"),
         )
-        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever = self._make_retriever()
         urls = retriever._collect_urls(paper, "PMC12345")
         assert any("PMC12345" in u for u in urls)
 
@@ -35,17 +41,17 @@ class TestCollectUrls:
             title="Test",
             ids=IDSet(doi="10.1234/test"),
         )
-        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever = self._make_retriever()
         urls = retriever._collect_urls(paper, "10.1234/test")
         assert "https://doi.org/10.1234/test" in urls
 
     def test_no_paper_doi_fallback(self):
-        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever = self._make_retriever()
         urls = retriever._collect_urls(None, "10.1234/test")
         assert "https://doi.org/10.1234/test" in urls
 
     def test_no_paper_non_doi(self):
-        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever = self._make_retriever()
         urls = retriever._collect_urls(None, "some_invalid_id")
         assert urls == []
 
@@ -57,9 +63,105 @@ class TestCollectUrls:
                 PDFLocation(url="https://doi.org/10.1234/test", source="doi"),
             ],
         )
-        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever = self._make_retriever()
         urls = retriever._collect_urls(paper, "10.1234/test")
         assert urls.count("https://doi.org/10.1234/test") == 1
+
+
+class TestPublisherUrls:
+    def _make_retriever(self, **config_kwargs):
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever.config = Config(**config_kwargs)
+        return retriever
+
+    def test_elsevier_url_added_with_key(self):
+        retriever = self._make_retriever(elsevier_api_key="els_test")
+        paper = Paper(title="Test", ids=IDSet(doi="10.1016/j.test.2024"))
+        urls = retriever._collect_urls(paper, "10.1016/j.test.2024")
+        assert any("api.elsevier.com" in u for u in urls)
+        # Publisher URL should be first (highest priority)
+        assert "api.elsevier.com" in urls[0]
+
+    def test_elsevier_url_not_added_without_key(self):
+        retriever = self._make_retriever()
+        paper = Paper(title="Test", ids=IDSet(doi="10.1016/j.test.2024"))
+        urls = retriever._collect_urls(paper, "10.1016/j.test.2024")
+        assert not any("api.elsevier.com" in u for u in urls)
+
+    def test_wiley_url_added_with_key(self):
+        retriever = self._make_retriever(wiley_tdm_token="wiley_test")
+        paper = Paper(title="Test", ids=IDSet(doi="10.1002/test.123"))
+        urls = retriever._collect_urls(paper, "10.1002/test.123")
+        assert any("api.wiley.com" in u for u in urls)
+
+    def test_springer_url_added_with_key(self):
+        retriever = self._make_retriever(springer_api_key="springer_test")
+        paper = Paper(title="Test", ids=IDSet(doi="10.1007/s123-test"))
+        urls = retriever._collect_urls(paper, "10.1007/s123-test")
+        assert any("api.springernature.com" in u for u in urls)
+
+    def test_springer_nature_prefix(self):
+        retriever = self._make_retriever(springer_api_key="springer_test")
+        paper = Paper(title="Test", ids=IDSet(doi="10.1038/nature12345"))
+        urls = retriever._collect_urls(paper, "10.1038/nature12345")
+        assert any("api.springernature.com" in u for u in urls)
+
+    def test_unknown_publisher_no_extra_urls(self):
+        retriever = self._make_retriever(elsevier_api_key="test")
+        paper = Paper(title="Test", ids=IDSet(doi="10.9999/unknown"))
+        urls = retriever._collect_urls(paper, "10.9999/unknown")
+        assert not any("api.elsevier.com" in u for u in urls)
+        assert not any("api.wiley.com" in u for u in urls)
+
+
+class TestPublisherMap:
+    def test_elsevier_prefix(self):
+        assert "10.1016" in _PUBLISHER_MAP
+
+    def test_wiley_prefix(self):
+        assert "10.1002" in _PUBLISHER_MAP
+
+    def test_springer_prefix(self):
+        assert "10.1007" in _PUBLISHER_MAP
+
+
+class TestReportFailures:
+    def _make_retriever(self):
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever.config = Config()
+        return retriever
+
+    def test_empty_failures(self, caplog):
+        import logging
+
+        retriever = self._make_retriever()
+        with caplog.at_level(logging.WARNING):
+            retriever._report_failures("10.1234/test", [], None)
+        assert "All PDF download attempts failed" in caplog.text
+
+    def test_failures_with_reasons(self, caplog):
+        import logging
+
+        retriever = self._make_retriever()
+        failures = [
+            ("https://example.com/paper.pdf", "403 Forbidden/Unauthorized"),
+            ("https://doi.org/10.1234/test", "timeout"),
+        ]
+        with caplog.at_level(logging.WARNING):
+            retriever._report_failures("10.1234/test", failures, None)
+        assert "Tried 2 source(s)" in caplog.text
+        assert "403 Forbidden" in caplog.text
+        assert "timeout" in caplog.text
+
+    def test_suggests_institutional_access(self, caplog):
+        import logging
+
+        retriever = self._make_retriever()
+        paper = Paper(title="Test", ids=IDSet(doi="10.1234/test"))
+        failures = [("https://example.com", "404 Not Found")]
+        with caplog.at_level(logging.INFO):
+            retriever._report_failures("10.1234/test", failures, paper)
+        assert "institutional access" in caplog.text
 
 
 class TestMakeFilename:

@@ -114,7 +114,13 @@ def create_parser() -> argparse.ArgumentParser:
     # -- pdf --
     pdf_p = subparsers.add_parser("pdf", help="download PDF for a paper")
     pdf_p.add_argument("id", help="DOI or other identifier")
-    pdf_p.add_argument("-o", "--output-dir", default=".", metavar="DIR")
+    pdf_p.add_argument(
+        "-o",
+        "--output",
+        default=".",
+        metavar="PATH",
+        help="output file path (.pdf) or directory (default: .)",
+    )
     pdf_p.add_argument("--filename", metavar="NAME", help="custom filename")
     pdf_p.add_argument(
         "--convert", action="store_true", help="also convert to markdown"
@@ -387,11 +393,21 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
 
     assert isinstance(config, Config)
 
+    # Determine if -o is a file path or directory
+    output_val = args.output
+    output_path = None
+    output_dir = "."
+    if output_val.endswith(".pdf"):
+        output_path = output_val
+    else:
+        output_dir = output_val
+
     async with PDFRetriever(config) as retriever:
         path = await retriever.download(
             identifier=args.id,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
             filename=args.filename,
+            output_path=output_path,
         )
 
     if path is None:

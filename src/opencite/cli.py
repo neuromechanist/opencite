@@ -483,7 +483,7 @@ async def _cmd_convert(args: argparse.Namespace, config: object) -> int:
             output_path=output_path,
             converter=args.converter,
             extract_images=args.extract_images,
-            images_dir=getattr(args, "images_dir", None),
+            images_dir=args.images_dir,
             mistral_api_key=config.mistral_api_key,
         )
     except FileNotFoundError as e:
@@ -567,9 +567,12 @@ async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
     # Write summary report if requested
     if args.summary:
         summary_path = args.summary
-        with open(summary_path, "w") as f:
-            json.dump(result.to_dict(), f, indent=2)
-        print(f"Summary written to {summary_path}", file=sys.stderr)
+        try:
+            with open(summary_path, "w") as f:
+                json.dump(result.to_dict(), f, indent=2)
+            print(f"Summary written to {summary_path}", file=sys.stderr)
+        except OSError as e:
+            print(f"Warning: could not write summary to {summary_path}: {e}", file=sys.stderr)
 
     return 1 if result.failed else 0
 

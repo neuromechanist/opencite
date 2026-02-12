@@ -80,9 +80,9 @@ def read_ids_from_json(path: str | Path) -> list[str]:
     if isinstance(data, dict) and "papers" in data:
         # opencite search result format
         return [
-            paper.get("doi") or paper.get("id", "")
+            id_
             for paper in data["papers"]
-            if paper.get("doi") or paper.get("id")
+            if (id_ := paper.get("doi") or paper.get("id", ""))
         ]
 
     raise ValueError("Unrecognized JSON format. Expected array or {papers: [...]}.")

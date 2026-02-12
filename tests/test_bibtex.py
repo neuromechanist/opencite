@@ -10,7 +10,11 @@ class TestMakeCiteKey:
     def test_basic(self):
         paper = Paper(
             title="Attention Is All You Need",
-            authors=[Author(name="Vaswani, Ashish", family_name="Vaswani", given_name="Ashish")],
+            authors=[
+                Author(
+                    name="Vaswani, Ashish", family_name="Vaswani", given_name="Ashish"
+                )
+            ],
             year=2017,
         )
         assert _make_cite_key(paper) == "vaswani2017attention"
@@ -42,7 +46,9 @@ class TestFormatAuthorsBibtex:
     def test_single_author(self):
         paper = Paper(
             title="Test",
-            authors=[Author(name="Smith, John", family_name="Smith", given_name="John")],
+            authors=[
+                Author(name="Smith, John", family_name="Smith", given_name="John")
+            ],
         )
         assert _format_authors_bibtex(paper) == "Smith, John"
 
@@ -76,7 +82,9 @@ class TestGenerateBibtex:
             title="Attention Is All You Need",
             ids=IDSet(doi="10.5555/3295222.3295349"),
             authors=[
-                Author(name="Vaswani, Ashish", family_name="Vaswani", given_name="Ashish"),
+                Author(
+                    name="Vaswani, Ashish", family_name="Vaswani", given_name="Ashish"
+                ),
             ],
             year=2017,
             source_venue=Source(name="NeurIPS"),

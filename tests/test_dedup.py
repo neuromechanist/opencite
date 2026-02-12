@@ -41,7 +41,9 @@ class TestDeduplicate:
     def test_no_duplicates(self):
         papers = [
             _paper("Attention Is All You Need", doi="10.1/a"),
-            _paper("BERT Pre-training of Deep Bidirectional Transformers", doi="10.1/b"),
+            _paper(
+                "BERT Pre-training of Deep Bidirectional Transformers", doi="10.1/b"
+            ),
         ]
         result = deduplicate(papers)
         assert len(result) == 2
@@ -140,13 +142,19 @@ class TestMergePapers:
         assert merged.citation_count == 100
 
     def test_prefer_more_authors(self):
-        a = _paper("Test", authors=[
-            Author(name="Smith", family_name="Smith"),
-        ])
-        b = _paper("Test", authors=[
-            Author(name="Alice Smith", family_name="Smith", given_name="Alice"),
-            Author(name="Bob Jones", family_name="Jones", given_name="Bob"),
-        ])
+        a = _paper(
+            "Test",
+            authors=[
+                Author(name="Smith", family_name="Smith"),
+            ],
+        )
+        b = _paper(
+            "Test",
+            authors=[
+                Author(name="Alice Smith", family_name="Smith", given_name="Alice"),
+                Author(name="Bob Jones", family_name="Jones", given_name="Bob"),
+            ],
+        )
         merged = merge_papers(a, b)
         assert len(merged.authors) == 2
 

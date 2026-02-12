@@ -69,12 +69,12 @@ class SearchOrchestrator:
 
         if "openalex" in sources:
             tasks["openalex"] = asyncio.create_task(
-                self._search_openalex(query, max_results, year_from, year_to, oa_only, sort)
+                self._search_openalex(
+                    query, max_results, year_from, year_to, oa_only, sort
+                )
             )
         if "s2" in sources:
-            tasks["s2"] = asyncio.create_task(
-                self._search_s2(query, max_results)
-            )
+            tasks["s2"] = asyncio.create_task(self._search_s2(query, max_results))
         if "pubmed" in sources:
             tasks["pubmed"] = asyncio.create_task(
                 self._search_pubmed(query, max_results)
@@ -209,30 +209,20 @@ class SearchOrchestrator:
         # Look up from other sources using available IDs
         if paper.doi:
             if "openalex" not in paper.data_sources:
-                tasks.append(asyncio.create_task(
-                    self._openalex.lookup_doi(paper.doi)
-                ))
+                tasks.append(asyncio.create_task(self._openalex.lookup_doi(paper.doi)))
             if "s2" not in paper.data_sources:
-                tasks.append(asyncio.create_task(
-                    self._s2.lookup(f"DOI:{paper.doi}")
-                ))
+                tasks.append(asyncio.create_task(self._s2.lookup(f"DOI:{paper.doi}")))
             if "pubmed" not in paper.data_sources:
-                tasks.append(asyncio.create_task(
-                    self._pubmed.lookup_doi(paper.doi)
-                ))
+                tasks.append(asyncio.create_task(self._pubmed.lookup_doi(paper.doi)))
         elif paper.pmid:
             if "openalex" not in paper.data_sources:
-                tasks.append(asyncio.create_task(
-                    self._openalex.lookup_pmid(paper.pmid)
-                ))
+                tasks.append(
+                    asyncio.create_task(self._openalex.lookup_pmid(paper.pmid))
+                )
             if "s2" not in paper.data_sources:
-                tasks.append(asyncio.create_task(
-                    self._s2.lookup(f"PMID:{paper.pmid}")
-                ))
+                tasks.append(asyncio.create_task(self._s2.lookup(f"PMID:{paper.pmid}")))
             if "pubmed" not in paper.data_sources:
-                tasks.append(asyncio.create_task(
-                    self._pubmed.lookup_pmid(paper.pmid)
-                ))
+                tasks.append(asyncio.create_task(self._pubmed.lookup_pmid(paper.pmid)))
 
         if not tasks:
             return paper

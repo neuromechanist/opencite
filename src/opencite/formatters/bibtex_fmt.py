@@ -20,7 +20,9 @@ class BibtexFormatter(OutputFormatter):
     """
 
     def format_papers(
-        self, papers: list[Paper], verbose: bool = False  # noqa: ARG002
+        self,
+        papers: list[Paper],
+        verbose: bool = False,  # noqa: ARG002
     ) -> str:
         entries = [_get_bibtex(p) for p in papers]
         return "\n\n".join(entries)

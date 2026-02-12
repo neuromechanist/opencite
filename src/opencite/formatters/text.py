@@ -13,9 +13,7 @@ if TYPE_CHECKING:
 class TextFormatter(OutputFormatter):
     """Format papers as readable text output."""
 
-    def format_papers(
-        self, papers: list[Paper], verbose: bool = False
-    ) -> str:
+    def format_papers(self, papers: list[Paper], verbose: bool = False) -> str:
         if not papers:
             return "No results found."
 
@@ -33,9 +31,7 @@ class TextFormatter(OutputFormatter):
     def format_single(self, paper: Paper, verbose: bool = False) -> str:
         return self._format_entry(1, paper, verbose)
 
-    def _format_entry(
-        self, index: int, paper: Paper, verbose: bool = False
-    ) -> str:
+    def _format_entry(self, index: int, paper: Paper, verbose: bool = False) -> str:
         parts = []
 
         # Title line

@@ -14,9 +14,7 @@ if TYPE_CHECKING:
 class JsonFormatter(OutputFormatter):
     """Format papers as JSON output."""
 
-    def format_papers(
-        self, papers: list[Paper], verbose: bool = False
-    ) -> str:
+    def format_papers(self, papers: list[Paper], verbose: bool = False) -> str:
         data = [_paper_to_dict(p, verbose) for p in papers]
         return json.dumps(data, indent=2, ensure_ascii=False)
 

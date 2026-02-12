@@ -65,17 +65,25 @@ class CitationExplorer:
         tasks: list[asyncio.Task[list[Paper]]] = []
 
         if seed.ids.openalex_id:
-            tasks.append(asyncio.create_task(
-                self._openalex.citing_papers(seed.ids.openalex_id, max_results=max_results, sort=sort)
-            ))
+            tasks.append(
+                asyncio.create_task(
+                    self._openalex.citing_papers(
+                        seed.ids.openalex_id, max_results=max_results, sort=sort
+                    )
+                )
+            )
         if seed.ids.s2_id:
-            tasks.append(asyncio.create_task(
-                self._s2.citing_papers(seed.ids.s2_id, max_results=max_results)
-            ))
+            tasks.append(
+                asyncio.create_task(
+                    self._s2.citing_papers(seed.ids.s2_id, max_results=max_results)
+                )
+            )
         elif seed.doi:
-            tasks.append(asyncio.create_task(
-                self._s2.citing_papers(f"DOI:{seed.doi}", max_results=max_results)
-            ))
+            tasks.append(
+                asyncio.create_task(
+                    self._s2.citing_papers(f"DOI:{seed.doi}", max_results=max_results)
+                )
+            )
 
         all_papers = await _gather_papers(tasks)
 
@@ -113,17 +121,25 @@ class CitationExplorer:
         tasks: list[asyncio.Task[list[Paper]]] = []
 
         if seed.ids.openalex_id:
-            tasks.append(asyncio.create_task(
-                self._openalex.references(seed.ids.openalex_id, max_results=max_results)
-            ))
+            tasks.append(
+                asyncio.create_task(
+                    self._openalex.references(
+                        seed.ids.openalex_id, max_results=max_results
+                    )
+                )
+            )
         if seed.ids.s2_id:
-            tasks.append(asyncio.create_task(
-                self._s2.references(seed.ids.s2_id, max_results=max_results)
-            ))
+            tasks.append(
+                asyncio.create_task(
+                    self._s2.references(seed.ids.s2_id, max_results=max_results)
+                )
+            )
         elif seed.doi:
-            tasks.append(asyncio.create_task(
-                self._s2.references(f"DOI:{seed.doi}", max_results=max_results)
-            ))
+            tasks.append(
+                asyncio.create_task(
+                    self._s2.references(f"DOI:{seed.doi}", max_results=max_results)
+                )
+            )
 
         all_papers = await _gather_papers(tasks)
         unique = deduplicate(all_papers)
@@ -165,6 +181,7 @@ class CitationExplorer:
                 oa_paper = await self._openalex.lookup_doi(id_value)
                 if oa_paper:
                     from opencite.dedup import merge_papers
+
                     paper = merge_papers(paper, oa_paper)
                 return paper
             return await self._openalex.lookup_doi(id_value)
@@ -175,6 +192,7 @@ class CitationExplorer:
                 oa_paper = await self._openalex.lookup_doi(paper.doi)
                 if oa_paper:
                     from opencite.dedup import merge_papers
+
                     paper = merge_papers(paper, oa_paper)
             return paper
 
@@ -193,6 +211,7 @@ class CitationExplorer:
 def _make_ids(id_type: IDType, id_value: str) -> object:
     """Create an IDSet with the given ID type populated."""
     from opencite.models import IDSet
+
     kwargs = {
         IDType.DOI: "doi",
         IDType.PMID: "pmid",
@@ -222,5 +241,7 @@ def _sort_papers(papers: list[Paper], sort: str) -> list[Paper]:
     if sort == "citations":
         return sorted(papers, key=lambda p: p.citation_count, reverse=True)
     if sort == "year":
-        return sorted(papers, key=lambda p: (p.year or 0, p.citation_count), reverse=True)
+        return sorted(
+            papers, key=lambda p: (p.year or 0, p.citation_count), reverse=True
+        )
     return papers

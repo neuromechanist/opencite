@@ -16,41 +16,45 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.semanticscholar.org/graph/v1"
 
 # Fields to request for full paper metadata
-PAPER_FIELDS = ",".join([
-    "paperId",
-    "title",
-    "abstract",
-    "year",
-    "url",
-    "openAccessPdf",
-    "citationCount",
-    "influentialCitationCount",
-    "externalIds",
-    "authors",
-    "journal",
-    "tldr",
-    "citationStyles",
-    "s2FieldsOfStudy",
-    "publicationTypes",
-    "isOpenAccess",
-    "publicationDate",
-])
+PAPER_FIELDS = ",".join(
+    [
+        "paperId",
+        "title",
+        "abstract",
+        "year",
+        "url",
+        "openAccessPdf",
+        "citationCount",
+        "influentialCitationCount",
+        "externalIds",
+        "authors",
+        "journal",
+        "tldr",
+        "citationStyles",
+        "s2FieldsOfStudy",
+        "publicationTypes",
+        "isOpenAccess",
+        "publicationDate",
+    ]
+)
 
 # Lighter fields for citation/reference lists
-CITATION_FIELDS = ",".join([
-    "paperId",
-    "title",
-    "abstract",
-    "year",
-    "url",
-    "openAccessPdf",
-    "citationCount",
-    "influentialCitationCount",
-    "externalIds",
-    "authors",
-    "journal",
-    "isOpenAccess",
-])
+CITATION_FIELDS = ",".join(
+    [
+        "paperId",
+        "title",
+        "abstract",
+        "year",
+        "url",
+        "openAccessPdf",
+        "citationCount",
+        "influentialCitationCount",
+        "externalIds",
+        "authors",
+        "journal",
+        "isOpenAccess",
+    ]
+)
 
 
 class SemanticScholarClient(BaseClient):
@@ -84,11 +88,7 @@ class SemanticScholarClient(BaseClient):
         }
         resp = await self.get("/paper/search", params=params)
         data = resp.json()
-        return [
-            self._parse_paper(p)
-            for p in data.get("data", [])
-            if p.get("title")
-        ]
+        return [self._parse_paper(p) for p in data.get("data", []) if p.get("title")]
 
     async def lookup(self, paper_id: str, fields: str | None = None) -> Paper | None:
         """Look up a single paper by ID.
@@ -190,12 +190,14 @@ class SemanticScholarClient(BaseClient):
             parts = name.rsplit(None, 1)
             family = parts[-1] if parts else name
             given = parts[0] if len(parts) > 1 else ""
-            authors.append(Author(
-                name=name,
-                family_name=family,
-                given_name=given,
-                s2_id=a.get("authorId", ""),
-            ))
+            authors.append(
+                Author(
+                    name=name,
+                    family_name=family,
+                    given_name=given,
+                    s2_id=a.get("authorId", ""),
+                )
+            )
 
         # Journal
         journal_info = data.get("journal") or {}
@@ -208,11 +210,13 @@ class SemanticScholarClient(BaseClient):
         pdf_locations = []
         oa_pdf = data.get("openAccessPdf")
         if oa_pdf and oa_pdf.get("url"):
-            pdf_locations.append(PDFLocation(
-                url=oa_pdf["url"],
-                source="s2",
-                is_oa=True,
-            ))
+            pdf_locations.append(
+                PDFLocation(
+                    url=oa_pdf["url"],
+                    source="s2",
+                    is_oa=True,
+                )
+            )
 
         # TLDR
         tldr_obj = data.get("tldr")

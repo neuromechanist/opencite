@@ -13,9 +13,7 @@ class OutputFormatter(ABC):
     """Abstract base for all output formatters."""
 
     @abstractmethod
-    def format_papers(
-        self, papers: list[Paper], verbose: bool = False
-    ) -> str:
+    def format_papers(self, papers: list[Paper], verbose: bool = False) -> str:
         """Format a list of papers into a string."""
         ...
 

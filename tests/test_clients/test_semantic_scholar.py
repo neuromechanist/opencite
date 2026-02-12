@@ -21,7 +21,9 @@ class TestSemanticScholarClient:
 
     async def test_search_returns_papers(self, config: Config):
         async with SemanticScholarClient(config) as client:
-            papers = await client.search("transformer attention mechanism", max_results=5)
+            papers = await client.search(
+                "transformer attention mechanism", max_results=5
+            )
         assert len(papers) > 0
         paper = papers[0]
         assert paper.title

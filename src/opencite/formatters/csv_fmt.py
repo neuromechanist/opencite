@@ -30,7 +30,9 @@ class CsvFormatter(OutputFormatter):
     """Format papers as CSV output."""
 
     def format_papers(
-        self, papers: list[Paper], verbose: bool = False  # noqa: ARG002
+        self,
+        papers: list[Paper],
+        verbose: bool = False,  # noqa: ARG002
     ) -> str:
         buf = io.StringIO()
         writer = csv.DictWriter(buf, fieldnames=_FIELDS)

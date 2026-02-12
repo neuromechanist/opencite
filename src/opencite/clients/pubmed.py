@@ -349,8 +349,18 @@ def _extract_pub_date(article: ET.Element) -> str:
 
 
 _MONTH_MAP = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
-    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
 }
 
 
@@ -374,10 +384,12 @@ def _extract_authors(article: ET.Element) -> list[Author]:
             # Collective author or incomplete
             collective = author_elem.find("CollectiveName")
             if collective is not None and collective.text:
-                authors.append(Author(
-                    name=collective.text,
-                    family_name=collective.text,
-                ))
+                authors.append(
+                    Author(
+                        name=collective.text,
+                        family_name=collective.text,
+                    )
+                )
             continue
         family = last_elem.text
         given = (fore_elem.text or "") if fore_elem is not None else ""
@@ -387,13 +399,17 @@ def _extract_authors(article: ET.Element) -> list[Author]:
         orcid = ""
         for ident in author_elem.findall("Identifier"):
             if ident.get("Source") == "ORCID" and ident.text:
-                orcid = ident.text.replace("http://orcid.org/", "").replace("https://orcid.org/", "")
+                orcid = ident.text.replace("http://orcid.org/", "").replace(
+                    "https://orcid.org/", ""
+                )
                 break
 
-        authors.append(Author(
-            name=name,
-            family_name=family,
-            given_name=given,
-            orcid=orcid,
-        ))
+        authors.append(
+            Author(
+                name=name,
+                family_name=family,
+                given_name=given,
+                orcid=orcid,
+            )
+        )
     return authors[:50]

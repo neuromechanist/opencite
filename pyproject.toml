@@ -49,9 +49,6 @@ opencite = "opencite.__main__:main"
 Repository = "https://github.com/neuromechanist/opencite"
 Issues = "https://github.com/neuromechanist/opencite/issues"
 
-[tool.uv.sources]
-markit-mistral = { git = "https://github.com/neuromechanist/markit-mistral.git" }
-
 [tool.hatch.version]
 path = "src/opencite/__init__.py"
 

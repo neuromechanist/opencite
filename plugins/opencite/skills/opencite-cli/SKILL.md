@@ -1,28 +1,49 @@
 ---
 name: OpenCite CLI
-description: This skill should be used when the user asks to "search for papers", "find citations", "look up a DOI", "get BibTeX", "download PDF", "convert PDF to markdown", "find canonical papers", "convert identifiers", or mentions opencite, academic literature search, citation management, or paper retrieval.
-version: 0.1.0
+description: This skill should be used when the user asks to "search for papers", "find citations", "look up a DOI", "get BibTeX", "download PDF", "convert PDF to markdown", "find canonical papers", "convert identifiers", "batch download papers", "configure opencite", or mentions opencite, academic literature search, citation management, or paper retrieval.
+version: 0.2.0
 ---
 
 # OpenCite CLI Reference
 
-OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, and PubMed, deduplicates them, and outputs formatted results.
+OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, and PubMed, deduplicates them, and outputs formatted results. It also supports PDF retrieval, PDF-to-markdown conversion, and batch operations.
 
 ## Installation
 
 ```bash
 uv sync                    # basic install
-uv sync --extra convert    # with PDF conversion support
+uv sync --extra convert    # with PDF conversion support (markitdown + markit-mistral)
 uv sync --extra dev        # with dev tools
 ```
 
-## Environment Variables
+## Configuration
 
-Required API keys in `.env`:
+opencite supports TOML config, `.env` files, and environment variables.
+
+```bash
+uv run opencite config init   # creates ~/.opencite/config.toml template
+uv run opencite config show   # display resolved config (keys masked)
+uv run opencite config path   # show config file location
+```
+
+Config loading priority (later overrides earlier):
+1. `~/.opencite/config.toml`
+2. `~/.opencite/.env`
+3. `.env` in working directory
+4. Environment variables
+
+### API Keys
+
 - `SEMANTIC_SCHOLAR_API_KEY` - Semantic Scholar API
 - `PUBMED_API_KEY` - NCBI/PubMed API
 - `OPENALEX_API_KEY` - OpenAlex API (required since Feb 2026)
 - `MISTRAL_API_KEY` - (optional) Mistral AI for enhanced PDF-to-markdown
+
+### Publisher Tokens (optional, for authenticated PDF access)
+
+- `ELSEVIER_API_KEY` - Elsevier/ScienceDirect
+- `WILEY_TDM_TOKEN` - Wiley TDM
+- `SPRINGER_API_KEY` - Springer Nature
 
 ## Commands
 
@@ -33,23 +54,30 @@ uv run opencite search "query string" [options]
 ```
 
 Options:
-- `--limit N` - Max results (default: 10)
-- `--sources s2,openalex,pubmed` - Which APIs to query
-- `--format text|json|bibtex|csv` - Output format
-- `--output FILE` - Write to file
-- `--verbose` - Show detailed progress
+- `--max N` - Max results (default: 20)
+- `--source all|openalex|s2|pubmed` - Which API to query (default: all)
+- `--year-from YYYY` - Published after year
+- `--year-to YYYY` - Published before year
+- `--oa-only` - Open access only
+- `--sort relevance|citations|year` - Sort order (default: relevance)
+- `-f, --format text|json|bibtex|csv` - Output format
+- `-o, --output FILE` - Write to file
+- `-v, --verbose` - Show abstracts
 
 ### lookup - Look up a paper
 
 ```bash
-uv run opencite lookup IDENTIFIER [options]
+uv run opencite lookup IDENTIFIER [IDENTIFIER ...] [options]
 ```
 
-Accepts DOI, PMID, PMCID, S2 ID, OpenAlex ID, or ArXiv ID. Auto-detects the type.
+Accepts DOI, `pmid:X`, `pmc:X`, `arxiv:X`, S2 ID, or OpenAlex ID. Auto-detects the type. Supports multiple IDs.
 
 Options:
-- `--format text|json|bibtex|csv`
-- `--output FILE`
+- `-f, --format text|json|bibtex`
+- `-o, --output FILE`
+- `--enrich` - Fetch from all APIs for richer data
+- `--append-bib FILE` - Append BibTeX to a .bib file
+- `-v, --verbose`
 
 ### cite - Citation graph
 
@@ -58,11 +86,13 @@ uv run opencite cite IDENTIFIER [options]
 ```
 
 Options:
-- `--direction citing|cited-by|both` - Direction of citations
-- `--depth N` - How many hops (default: 1)
-- `--limit N` - Max papers per hop
-- `--format text|json|bibtex|csv`
-- `--output FILE`
+- `--direction citing|references|both` - Direction (default: citing)
+- `--max N` - Max papers (default: 50)
+- `--sort citations|year` - Sort order (default: citations)
+- `--min-citations N` - Minimum citation count filter
+- `-f, --format text|json|bibtex`
+- `-o, --output FILE`
+- `-v, --verbose`
 
 ### canonical - Most-cited papers
 
@@ -73,9 +103,12 @@ uv run opencite canonical "topic" [options]
 Finds the most-cited, foundational papers for a topic.
 
 Options:
-- `--limit N` - Number of papers (default: 10)
-- `--format text|json|bibtex|csv`
-- `--output FILE`
+- `--max N` - Number of papers (default: 10)
+- `--year-from YYYY` - Published after year
+- `--min-citations N` - Minimum citations (default: 100)
+- `-f, --format text|json|bibtex`
+- `-o, --output FILE`
+- `-v, --verbose`
 
 ### pdf - Download PDF
 
@@ -83,10 +116,13 @@ Options:
 uv run opencite pdf IDENTIFIER [options]
 ```
 
-Tries multiple sources: OpenAlex, S2, PMC Open Access, DOI content negotiation.
+Tries multiple sources in priority order: publisher APIs (if tokens configured), OpenAlex/S2 PDF locations, PMC Open Access, DOI content negotiation.
 
 Options:
-- `--output FILE` - Output path (default: auto-named from title)
+- `-o, --output PATH` - Output file path (.pdf) or directory (default: .)
+- `--filename NAME` - Custom filename
+- `--convert` - Also convert downloaded PDF to markdown
+- `--converter auto|markitdown|mistral` - Converter for markdown (default: auto)
 
 ### convert - PDF to markdown
 
@@ -94,72 +130,115 @@ Options:
 uv run opencite convert FILE.pdf [options]
 ```
 
-Uses markitdown (free) or markit-mistral (if MISTRAL_API_KEY set) for better math/complex layout handling.
+Uses markitdown (free, local) by default. If `MISTRAL_API_KEY` is set, auto mode selects markit-mistral for better math/complex layout handling.
 
 Options:
-- `--output FILE` - Output path
-- `--method auto|markitdown|mistral` - Conversion method
+- `-o, --output FILE` - Output markdown path
+- `--converter auto|markitdown|mistral` - Conversion method (default: auto)
+- `--extract-images` - Extract images from PDF (mistral only)
+- `--images-dir DIR` - Directory for extracted images
 
 ### ids - Convert identifiers
 
 ```bash
-uv run opencite ids IDENTIFIER [options]
+uv run opencite ids IDENTIFIER [IDENTIFIER ...] [options]
 ```
 
+Converts between DOI, PMID, and PMCID using the NCBI ID Converter API.
+
 Options:
-- `--from doi|pmid|pmcid` - Source ID type
-- `--to doi|pmid|pmcid` - Target ID type
+- `-f, --format text|json`
+
+### batch-fetch - Batch download PDFs
+
+```bash
+uv run opencite batch-fetch FILE [options]
+uv run opencite batch-fetch --from-json FILE [options]
+uv run opencite batch-fetch --from-stdin [options]
+```
+
+Downloads PDFs for multiple papers with controlled concurrency.
+
+Input sources (mutually exclusive):
+- Positional `FILE` - Text file with IDs, one per line
+- `--from-json FILE` - JSON file (array of DOIs or opencite search results)
+- `--from-stdin` - Read IDs from stdin (pipe-friendly)
+
+Options:
+- `-o, --output-dir DIR` - Output directory (default: ./papers)
+- `--convert` - Also convert each PDF to markdown
+- `--converter auto|markitdown|mistral` - Converter (default: auto)
+- `--concurrency N` - Max concurrent downloads (default: 3)
+- `--summary FILE` - Write JSON summary report to file
+
+### config - Manage configuration
+
+```bash
+uv run opencite config init   # create ~/.opencite/config.toml template
+uv run opencite config show   # display resolved config (keys masked)
+uv run opencite config path   # show config file location
+```
 
 ## Common Workflows
 
 ### Literature review: search, filter, export
 ```bash
 # Search broadly
-uv run opencite search "motor cortex oscillations" --limit 20 --format json --output results.json
+uv run opencite search "motor cortex oscillations" --max 20 -f json -o results.json
 
 # Export BibTeX for citation manager
-uv run opencite search "motor cortex oscillations" --limit 20 --format bibtex --output refs.bib
+uv run opencite search "motor cortex oscillations" --max 20 -f bibtex -o refs.bib
 ```
 
 ### Deep-dive on a paper's impact
 ```bash
 # Look up the paper
-uv run opencite lookup "10.1038/s41586-024-07487-w"
+uv run opencite lookup "10.1038/s41586-024-07487-w" -v
 
 # Get papers that cite it
-uv run opencite cite "10.1038/s41586-024-07487-w" --direction citing --limit 20
+uv run opencite cite "10.1038/s41586-024-07487-w" --direction citing --max 20
 
 # Get its references
-uv run opencite cite "10.1038/s41586-024-07487-w" --direction cited-by --limit 20
+uv run opencite cite "10.1038/s41586-024-07487-w" --direction references --max 20
 ```
 
 ### Find foundational papers and download
 ```bash
 # Find canonical papers
-uv run opencite canonical "attention mechanism" --limit 5
+uv run opencite canonical "attention mechanism" --max 5
 
-# Download the top result's PDF
-uv run opencite pdf "DOI_FROM_RESULTS" --output attention.pdf
+# Download and convert in one step
+uv run opencite pdf "10.1234/example" -o attention.pdf --convert
+```
 
-# Convert to markdown for reading
-uv run opencite convert attention.pdf --output attention.md
+### Batch workflow: search then download all
+```bash
+# Search and save results as JSON
+uv run opencite search "tDCS motor cortex" --max 30 -f json -o results.json
+
+# Batch download all PDFs with conversion
+uv run opencite batch-fetch --from-json results.json --convert --summary report.json -o ./papers
+
+# Or from a simple text file of DOIs
+uv run opencite batch-fetch dois.txt --convert -o ./papers
 ```
 
 ### Cross-reference identifier conversion
 ```bash
-# Convert DOI to PMID
-uv run opencite ids "10.1001/jama.2024.12345" --from doi --to pmid
+# Single ID
+uv run opencite ids "10.1001/jama.2024.12345"
 
-# Convert PMID to DOI
-uv run opencite ids "38765432" --from pmid --to doi
+# Multiple IDs with JSON output
+uv run opencite ids "10.1001/jama.2024.12345" "PMC7654321" -f json
 ```
 
 ## Error Handling
 
 - **Rate limits**: Semantic Scholar has aggressive rate limiting (1 req/sec). If you get rate limit errors, wait and retry.
 - **Missing API keys**: Commands will warn about missing keys but still query available sources.
-- **Timeouts**: API calls may time out; retry or try a different source with `--sources`.
+- **Timeouts**: API calls may time out; retry or try a different source with `--source`.
 - **No results**: Try broader search terms or check identifier format.
+- **PDF not found**: opencite reports which sources were tried and why each failed. Papers behind paywalls may need institutional access or publisher API tokens.
 
 ## Python API
 
@@ -169,6 +248,6 @@ from opencite import Config, Paper, SearchResult
 from opencite.search import SearchOrchestrator
 
 config = Config.from_env()
-orchestrator = SearchOrchestrator(config)
-results = await orchestrator.search("query", limit=10)
+async with SearchOrchestrator(config) as searcher:
+    results = await searcher.search("query", max_results=10)
 ```

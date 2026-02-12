@@ -454,13 +454,17 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
         from opencite.convert import convert_pdf
 
         md_out = path.with_suffix(".md")
-        convert_pdf(
-            str(path),
-            output_path=str(md_out),
-            converter=args.converter,
-            mistral_api_key=config.mistral_api_key,
-        )
-        print(f"Converted: {md_out}", file=sys.stderr)
+        try:
+            convert_pdf(
+                str(path),
+                output_path=str(md_out),
+                converter=args.converter,
+                mistral_api_key=config.mistral_api_key,
+            )
+            print(f"Converted: {md_out}", file=sys.stderr)
+        except Exception as e:
+            print(f"Conversion failed: {e}", file=sys.stderr)
+            return 1
 
     return 0
 
@@ -473,14 +477,24 @@ async def _cmd_convert(args: argparse.Namespace, config: object) -> int:
     assert isinstance(config, Config)
 
     output_path = args.output
-    md_text = convert_pdf(
-        args.file,
-        output_path=output_path,
-        converter=args.converter,
-        extract_images=args.extract_images,
-        images_dir=getattr(args, "images_dir", None),
-        mistral_api_key=config.mistral_api_key,
-    )
+    try:
+        md_text = convert_pdf(
+            args.file,
+            output_path=output_path,
+            converter=args.converter,
+            extract_images=args.extract_images,
+            images_dir=getattr(args, "images_dir", None),
+            mistral_api_key=config.mistral_api_key,
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ImportError as e:
+        print(f"Missing dependency: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Conversion failed: {e}", file=sys.stderr)
+        return 1
 
     if not output_path:
         print(md_text)
@@ -505,12 +519,16 @@ async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
     assert isinstance(config, Config)
 
     # Read identifiers from the specified source
-    if args.from_stdin:
-        ids = read_ids_from_stdin()
-    elif args.from_json:
-        ids = read_ids_from_json(args.from_json)
-    else:
-        ids = read_ids_from_file(args.file)
+    try:
+        if args.from_stdin:
+            ids = read_ids_from_stdin()
+        elif args.from_json:
+            ids = read_ids_from_json(args.from_json)
+        else:
+            ids = read_ids_from_file(args.file)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     if not ids:
         print("No identifiers provided.", file=sys.stderr)
@@ -535,6 +553,12 @@ async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
     )
     if args.convert:
         print(f", {result.converted} converted", file=sys.stderr, end="")
+    if result.conversion_failed:
+        print(
+            f", {len(result.conversion_failed)} conversion(s) failed",
+            file=sys.stderr,
+            end="",
+        )
     if result.failed:
         print(f", {len(result.failed)} failed", file=sys.stderr)
     else:

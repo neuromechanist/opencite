@@ -205,7 +205,7 @@ class PDFRetriever:
             token = self.config.springer_api_key
             if token:
                 headers["Accept"] = "application/pdf"
-                url = f"{url}?api_key={token}"
+                headers["X-ApiKey"] = token
         elif "doi.org" in url:
             headers["Accept"] = "application/pdf"
 

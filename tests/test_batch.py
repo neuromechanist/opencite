@@ -21,6 +21,7 @@ class TestBatchResult:
             downloaded=2,
             converted=1,
             failed=[("10.1234/test", "not found")],
+            conversion_failed=[("10.1234/other", "converter error")],
         )
         d = result.to_dict()
         assert d["total"] == 3
@@ -29,6 +30,9 @@ class TestBatchResult:
         assert len(d["failed"]) == 1
         assert d["failed"][0]["id"] == "10.1234/test"
         assert d["failed"][0]["reason"] == "not found"
+        assert len(d["conversion_failed"]) == 1
+        assert d["conversion_failed"][0]["id"] == "10.1234/other"
+        assert d["conversion_failed"][0]["reason"] == "converter error"
 
     def test_empty_result(self):
         result = BatchResult()
@@ -36,6 +40,7 @@ class TestBatchResult:
         assert d["total"] == 0
         assert d["downloaded"] == 0
         assert d["failed"] == []
+        assert d["conversion_failed"] == []
 
 
 class TestReadIdsFromFile:
@@ -93,4 +98,15 @@ class TestReadIdsFromJson:
             json.dump({"something": "else"}, f)
             f.flush()
             with pytest.raises(ValueError, match="Unrecognized JSON format"):
+                read_ids_from_json(f.name)
+
+    def test_missing_file(self):
+        with pytest.raises(FileNotFoundError):
+            read_ids_from_json("/nonexistent/data.json")
+
+    def test_invalid_json(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("not valid json {{{")
+            f.flush()
+            with pytest.raises(ValueError, match="Invalid JSON"):
                 read_ids_from_json(f.name)

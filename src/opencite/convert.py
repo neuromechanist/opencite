@@ -48,8 +48,8 @@ def convert_pdf(
     else:
         md_text = _convert_with_markitdown(pdf_path)
 
-    if output_path and not extract_images:
-        # When extract_images is True, markit-mistral handles output writing
+    if output_path and not (extract_images and converter == "mistral"):
+        # When extract_images with mistral, markit-mistral handles output writing
         out = Path(output_path)
         out.write_text(md_text, encoding="utf-8")
         logger.info("Markdown written to %s", out)
@@ -113,6 +113,11 @@ def _convert_with_mistral(
             output_dir=output_dir,
             extract_images=True,
         )
-        return out.read_text(encoding="utf-8") if out.exists() else ""
+        if not out.exists():
+            raise RuntimeError(
+                f"Conversion produced no output for {pdf_path}. "
+                "Check that the PDF is valid and the Mistral API key is correct."
+            )
+        return out.read_text(encoding="utf-8")
 
     return converter.convert(str(pdf_path))

@@ -26,6 +26,7 @@ class BatchResult:
     downloaded: int = 0
     converted: int = 0
     failed: list[tuple[str, str]] = field(default_factory=list)
+    conversion_failed: list[tuple[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -33,6 +34,10 @@ class BatchResult:
             "downloaded": self.downloaded,
             "converted": self.converted,
             "failed": [{"id": id_, "reason": reason} for id_, reason in self.failed],
+            "conversion_failed": [
+                {"id": id_, "reason": reason}
+                for id_, reason in self.conversion_failed
+            ],
         }
 
 
@@ -52,7 +57,13 @@ def read_ids_from_file(path: str | Path) -> list[str]:
 def read_ids_from_json(path: str | Path) -> list[str]:
     """Read DOIs from a JSON file (search results or array of DOIs)."""
     p = Path(path)
-    data = json.loads(p.read_text())
+    if not p.exists():
+        raise FileNotFoundError(f"Input file not found: {p}")
+
+    try:
+        data = json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {p}: {e}") from e
 
     if isinstance(data, list):
         # Array of strings (DOIs) or array of paper objects
@@ -61,7 +72,6 @@ def read_ids_from_json(path: str | Path) -> list[str]:
             if isinstance(item, str):
                 ids.append(item)
             elif isinstance(item, dict):
-                # Try common fields
                 doi = item.get("doi") or item.get("DOI") or item.get("id", "")
                 if doi:
                     ids.append(doi)
@@ -70,9 +80,9 @@ def read_ids_from_json(path: str | Path) -> list[str]:
     if isinstance(data, dict) and "papers" in data:
         # opencite search result format
         return [
-            p.get("doi", p.get("id", ""))
-            for p in data["papers"]
-            if p.get("doi") or p.get("id")
+            paper.get("doi") or paper.get("id", "")
+            for paper in data["papers"]
+            if paper.get("doi") or paper.get("id")
         ]
 
     raise ValueError("Unrecognized JSON format. Expected array or {papers: [...]}.")
@@ -114,14 +124,15 @@ async def batch_download(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    async def _process_one(identifier: str) -> None:
+    async def _process_one(
+        identifier: str, retriever: PDFRetriever
+    ) -> None:
         async with semaphore:
             try:
-                async with PDFRetriever(config) as retriever:
-                    path = await retriever.download(
-                        identifier=identifier,
-                        output_dir=output_dir,
-                    )
+                path = await retriever.download(
+                    identifier=identifier,
+                    output_dir=output_dir,
+                )
 
                 if path is None:
                     result.failed.append((identifier, "no PDF source found"))
@@ -144,13 +155,21 @@ async def batch_download(
                         )
                         result.converted += 1
                     except Exception as e:
-                        logger.warning("Conversion failed for %s: %s", identifier, e)
+                        result.conversion_failed.append((identifier, str(e)))
+                        print(
+                            f"  CONVERT FAIL: {identifier} ({e})",
+                            file=sys.stderr,
+                        )
 
             except Exception as e:
+                logger.debug("Batch download error for %s", identifier, exc_info=True)
                 result.failed.append((identifier, str(e)))
                 print(f"  FAIL: {identifier} ({e})", file=sys.stderr)
 
-    tasks = [asyncio.create_task(_process_one(id_)) for id_ in ids]
-    await asyncio.gather(*tasks)
+    async with PDFRetriever(config) as retriever:
+        tasks = [
+            asyncio.create_task(_process_one(id_, retriever)) for id_ in ids
+        ]
+        await asyncio.gather(*tasks)
 
     return result

@@ -147,7 +147,7 @@ class TestCLIArgParsing:
         )
         assert args.command == "pdf"
         assert args.id == "10.1234/test"
-        assert args.output_dir == "/tmp/papers"
+        assert args.output == "/tmp/papers"
         assert args.convert is True
         assert args.converter == "mistral"
 
@@ -193,3 +193,39 @@ class TestCLIArgParsing:
         parser = create_parser()
         args = parser.parse_args(["search", "test", "-f", "csv"])
         assert args.format == "csv"
+
+    def test_batch_fetch_parser_file(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(
+            ["batch-fetch", "dois.txt", "-o", "./papers", "--convert", "--concurrency", "5"]
+        )
+        assert args.command == "batch-fetch"
+        assert args.file == "dois.txt"
+        assert args.output_dir == "./papers"
+        assert args.convert is True
+        assert args.concurrency == 5
+
+    def test_batch_fetch_parser_json(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["batch-fetch", "--from-json", "results.json"])
+        assert args.from_json == "results.json"
+        assert args.file is None
+
+    def test_batch_fetch_parser_stdin(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["batch-fetch", "--from-stdin"])
+        assert args.from_stdin is True
+
+    def test_config_parser(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["config", "init"])
+        assert args.command == "config"
+        assert args.config_action == "init"

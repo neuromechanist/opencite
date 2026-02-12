@@ -114,7 +114,13 @@ def create_parser() -> argparse.ArgumentParser:
     # -- pdf --
     pdf_p = subparsers.add_parser("pdf", help="download PDF for a paper")
     pdf_p.add_argument("id", help="DOI or other identifier")
-    pdf_p.add_argument("-o", "--output-dir", default=".", metavar="DIR")
+    pdf_p.add_argument(
+        "-o",
+        "--output",
+        default=".",
+        metavar="PATH",
+        help="output file path (.pdf) or directory (default: .)",
+    )
     pdf_p.add_argument("--filename", metavar="NAME", help="custom filename")
     pdf_p.add_argument(
         "--convert", action="store_true", help="also convert to markdown"
@@ -133,14 +139,55 @@ def create_parser() -> argparse.ArgumentParser:
     )
     convert_p.add_argument(
         "--converter",
-        choices=["markitdown", "mistral"],
-        default="markitdown",
+        choices=["markitdown", "mistral", "auto"],
+        default="auto",
+    )
+    convert_p.add_argument(
+        "--extract-images",
+        action="store_true",
+        help="extract images from PDF (mistral only)",
+    )
+    convert_p.add_argument(
+        "--images-dir", metavar="DIR", help="directory for extracted images"
     )
 
     # -- ids --
     ids_p = subparsers.add_parser("ids", help="convert between PMID, PMCID, and DOI")
     ids_p.add_argument("id", nargs="+", help="identifiers to convert")
     ids_p.add_argument("-f", "--format", choices=["text", "json"], default="text")
+
+    # -- batch-fetch --
+    batch_p = subparsers.add_parser(
+        "batch-fetch", help="download PDFs for multiple papers"
+    )
+    batch_input = batch_p.add_mutually_exclusive_group(required=True)
+    batch_input.add_argument("file", nargs="?", help="text file with IDs (one per line)")
+    batch_input.add_argument(
+        "--from-json", metavar="FILE", help="JSON file with DOIs or search results"
+    )
+    batch_input.add_argument(
+        "--from-stdin", action="store_true", help="read IDs from stdin"
+    )
+    batch_p.add_argument(
+        "-o", "--output-dir", default="./papers", metavar="DIR", help="output directory"
+    )
+    batch_p.add_argument(
+        "--convert", action="store_true", help="also convert PDFs to markdown"
+    )
+    batch_p.add_argument(
+        "--converter",
+        choices=["markitdown", "mistral", "auto"],
+        default="auto",
+    )
+    batch_p.add_argument(
+        "--concurrency",
+        type=int,
+        default=3,
+        help="max concurrent downloads (default: 3)",
+    )
+    batch_p.add_argument(
+        "--summary", metavar="FILE", help="write JSON summary report to file"
+    )
 
     # -- config --
     config_p = subparsers.add_parser("config", help="manage opencite configuration")
@@ -182,6 +229,7 @@ def main() -> int:
         "ids": _cmd_ids,
         "pdf": _cmd_pdf,
         "convert": _cmd_convert,
+        "batch-fetch": _cmd_batch_fetch,
     }
 
     handler = dispatch.get(args.command)
@@ -379,11 +427,21 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
 
     assert isinstance(config, Config)
 
+    # Determine if -o is a file path or directory
+    output_val = args.output
+    output_path = None
+    output_dir = "."
+    if output_val.endswith(".pdf"):
+        output_path = output_val
+    else:
+        output_dir = output_val
+
     async with PDFRetriever(config) as retriever:
         path = await retriever.download(
             identifier=args.id,
-            output_dir=args.output_dir,
+            output_dir=output_dir,
             filename=args.filename,
+            output_path=output_path,
         )
 
     if path is None:
@@ -396,18 +454,47 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
         from opencite.convert import convert_pdf
 
         md_out = path.with_suffix(".md")
-        convert_pdf(str(path), output_path=str(md_out), converter=args.converter)
-        print(f"Converted: {md_out}", file=sys.stderr)
+        try:
+            convert_pdf(
+                str(path),
+                output_path=str(md_out),
+                converter=args.converter,
+                mistral_api_key=config.mistral_api_key,
+            )
+            print(f"Converted: {md_out}", file=sys.stderr)
+        except Exception as e:
+            print(f"Conversion failed: {e}", file=sys.stderr)
+            return 1
 
     return 0
 
 
-async def _cmd_convert(args: argparse.Namespace, config: object) -> int:  # noqa: ARG001
+async def _cmd_convert(args: argparse.Namespace, config: object) -> int:
     """Handle the 'convert' subcommand."""
+    from opencite.config import Config
     from opencite.convert import convert_pdf
 
+    assert isinstance(config, Config)
+
     output_path = args.output
-    md_text = convert_pdf(args.file, output_path=output_path, converter=args.converter)
+    try:
+        md_text = convert_pdf(
+            args.file,
+            output_path=output_path,
+            converter=args.converter,
+            extract_images=args.extract_images,
+            images_dir=args.images_dir,
+            mistral_api_key=config.mistral_api_key,
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except ImportError as e:
+        print(f"Missing dependency: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Conversion failed: {e}", file=sys.stderr)
+        return 1
 
     if not output_path:
         print(md_text)
@@ -415,6 +502,80 @@ async def _cmd_convert(args: argparse.Namespace, config: object) -> int:  # noqa
         print(f"Converted: {output_path}", file=sys.stderr)
 
     return 0
+
+
+async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'batch-fetch' subcommand."""
+    import json
+
+    from opencite.batch import (
+        batch_download,
+        read_ids_from_file,
+        read_ids_from_json,
+        read_ids_from_stdin,
+    )
+    from opencite.config import Config
+
+    assert isinstance(config, Config)
+
+    # Read identifiers from the specified source
+    try:
+        if args.from_stdin:
+            ids = read_ids_from_stdin()
+        elif args.from_json:
+            ids = read_ids_from_json(args.from_json)
+        else:
+            ids = read_ids_from_file(args.file)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if not ids:
+        print("No identifiers provided.", file=sys.stderr)
+        return 1
+
+    print(f"Batch downloading {len(ids)} paper(s)...", file=sys.stderr)
+
+    result = await batch_download(
+        ids=ids,
+        config=config,
+        output_dir=args.output_dir,
+        convert=args.convert,
+        converter=args.converter,
+        concurrency=args.concurrency,
+    )
+
+    # Print summary
+    print(
+        f"\nDone: {result.downloaded}/{result.total} downloaded",
+        file=sys.stderr,
+        end="",
+    )
+    if args.convert:
+        print(f", {result.converted} converted", file=sys.stderr, end="")
+    if result.conversion_failed:
+        print(
+            f", {len(result.conversion_failed)} conversion(s) failed",
+            file=sys.stderr,
+            end="",
+        )
+    if result.failed:
+        print(f", {len(result.failed)} failed", file=sys.stderr)
+    else:
+        print(file=sys.stderr)
+
+    # Write summary report if requested
+    if args.summary:
+        summary_path = args.summary
+        try:
+            with open(summary_path, "w") as f:
+                json.dump(result.to_dict(), f, indent=2)
+            print(f"Summary written to {summary_path}", file=sys.stderr)
+        except OSError as e:
+            print(f"Warning: could not write summary to {summary_path}: {e}", file=sys.stderr)
+
+    return 1 if result.failed else 0
+
 
 
 def _cmd_config(args: argparse.Namespace) -> int:

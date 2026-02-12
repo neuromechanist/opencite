@@ -156,6 +156,39 @@ def create_parser() -> argparse.ArgumentParser:
     ids_p.add_argument("id", nargs="+", help="identifiers to convert")
     ids_p.add_argument("-f", "--format", choices=["text", "json"], default="text")
 
+    # -- batch-fetch --
+    batch_p = subparsers.add_parser(
+        "batch-fetch", help="download PDFs for multiple papers"
+    )
+    batch_input = batch_p.add_mutually_exclusive_group(required=True)
+    batch_input.add_argument("file", nargs="?", help="text file with IDs (one per line)")
+    batch_input.add_argument(
+        "--from-json", metavar="FILE", help="JSON file with DOIs or search results"
+    )
+    batch_input.add_argument(
+        "--from-stdin", action="store_true", help="read IDs from stdin"
+    )
+    batch_p.add_argument(
+        "-o", "--output-dir", default="./papers", metavar="DIR", help="output directory"
+    )
+    batch_p.add_argument(
+        "--convert", action="store_true", help="also convert PDFs to markdown"
+    )
+    batch_p.add_argument(
+        "--converter",
+        choices=["markitdown", "mistral", "auto"],
+        default="auto",
+    )
+    batch_p.add_argument(
+        "--concurrency",
+        type=int,
+        default=3,
+        help="max concurrent downloads (default: 3)",
+    )
+    batch_p.add_argument(
+        "--summary", metavar="FILE", help="write JSON summary report to file"
+    )
+
     # -- config --
     config_p = subparsers.add_parser("config", help="manage opencite configuration")
     config_sub = config_p.add_subparsers(dest="config_action")
@@ -196,6 +229,7 @@ def main() -> int:
         "ids": _cmd_ids,
         "pdf": _cmd_pdf,
         "convert": _cmd_convert,
+        "batch-fetch": _cmd_batch_fetch,
     }
 
     handler = dispatch.get(args.command)
@@ -454,6 +488,66 @@ async def _cmd_convert(args: argparse.Namespace, config: object) -> int:
         print(f"Converted: {output_path}", file=sys.stderr)
 
     return 0
+
+
+async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
+    """Handle the 'batch-fetch' subcommand."""
+    import json
+
+    from opencite.batch import (
+        batch_download,
+        read_ids_from_file,
+        read_ids_from_json,
+        read_ids_from_stdin,
+    )
+    from opencite.config import Config
+
+    assert isinstance(config, Config)
+
+    # Read identifiers from the specified source
+    if args.from_stdin:
+        ids = read_ids_from_stdin()
+    elif args.from_json:
+        ids = read_ids_from_json(args.from_json)
+    else:
+        ids = read_ids_from_file(args.file)
+
+    if not ids:
+        print("No identifiers provided.", file=sys.stderr)
+        return 1
+
+    print(f"Batch downloading {len(ids)} paper(s)...", file=sys.stderr)
+
+    result = await batch_download(
+        ids=ids,
+        config=config,
+        output_dir=args.output_dir,
+        convert=args.convert,
+        converter=args.converter,
+        concurrency=args.concurrency,
+    )
+
+    # Print summary
+    print(
+        f"\nDone: {result.downloaded}/{result.total} downloaded",
+        file=sys.stderr,
+        end="",
+    )
+    if args.convert:
+        print(f", {result.converted} converted", file=sys.stderr, end="")
+    if result.failed:
+        print(f", {len(result.failed)} failed", file=sys.stderr)
+    else:
+        print(file=sys.stderr)
+
+    # Write summary report if requested
+    if args.summary:
+        summary_path = args.summary
+        with open(summary_path, "w") as f:
+            json.dump(result.to_dict(), f, indent=2)
+        print(f"Summary written to {summary_path}", file=sys.stderr)
+
+    return 1 if result.failed else 0
 
 
 def _cmd_config(args: argparse.Namespace) -> int:

@@ -210,9 +210,7 @@ class PDFRetriever:
             headers["Accept"] = "application/pdf"
 
         try:
-            async with httpx.AsyncClient(
-                timeout=60.0, follow_redirects=True
-            ) as client:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
 

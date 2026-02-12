@@ -577,6 +577,7 @@ async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
     return 1 if result.failed else 0
 
 
+
 def _cmd_config(args: argparse.Namespace) -> int:
     """Handle the 'config' subcommand (sync, no async needed)."""
     from opencite.config import Config, _resolve_config_path, create_default_config

@@ -11,8 +11,16 @@ OpenCite is a CLI tool and Python library for academic literature search and cit
 ## Installation
 
 ```bash
-uv tool install opencite                # install globally, use with `uvx opencite` or `opencite`
-uv tool install 'opencite[convert]'     # with PDF conversion support (markitdown + markit-mistral)
+# Option 1: uv (recommended)
+uv pip install opencite                 # install globally
+uv pip install 'opencite[convert]'      # with PDF conversion support (markitdown + markit-mistral)
+
+# Option 2: pip
+pip install opencite
+pip install 'opencite[convert]'
+
+# Option 3: uvx (no install needed, runs from cache)
+uvx opencite --version
 ```
 
 For development:

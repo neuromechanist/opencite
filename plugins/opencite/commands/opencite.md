@@ -16,7 +16,7 @@ First, verify opencite is installed:
 uvx opencite --version
 ```
 
-If not installed, run `uv tool install opencite` or `pip install opencite`.
+If not installed, run `uv pip install opencite` or `pip install opencite`.
 
 ## Routing
 

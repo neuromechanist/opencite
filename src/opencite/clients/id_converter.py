@@ -66,11 +66,13 @@ class IDConverterClient(BaseClient):
                 for record in data.get("records", []):
                     if record.get("status") == "error":
                         continue
-                    results.append(IDSet(
-                        doi=str(record.get("doi", "") or ""),
-                        pmid=str(record.get("pmid", "") or ""),
-                        pmcid=str(record.get("pmcid", "") or ""),
-                    ))
+                    results.append(
+                        IDSet(
+                            doi=str(record.get("doi", "") or ""),
+                            pmid=str(record.get("pmid", "") or ""),
+                            pmcid=str(record.get("pmcid", "") or ""),
+                        )
+                    )
             except Exception:
                 logger.warning("ID conversion failed for chunk at %d", i)
         return results

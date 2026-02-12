@@ -47,18 +47,28 @@ class TestCLIArgParsing:
         from opencite.cli import create_parser
 
         parser = create_parser()
-        args = parser.parse_args([
-            "search", "query",
-            "--source", "openalex",
-            "--max", "10",
-            "--year-from", "2020",
-            "--year-to", "2024",
-            "--oa-only",
-            "--sort", "citations",
-            "-f", "json",
-            "-o", "out.json",
-            "-v",
-        ])
+        args = parser.parse_args(
+            [
+                "search",
+                "query",
+                "--source",
+                "openalex",
+                "--max",
+                "10",
+                "--year-from",
+                "2020",
+                "--year-to",
+                "2024",
+                "--oa-only",
+                "--sort",
+                "citations",
+                "-f",
+                "json",
+                "-o",
+                "out.json",
+                "-v",
+            ]
+        )
         assert args.source == "openalex"
         assert args.year_from == 2020
         assert args.year_to == 2024
@@ -105,11 +115,16 @@ class TestCLIArgParsing:
         from opencite.cli import create_parser
 
         parser = create_parser()
-        args = parser.parse_args([
-            "canonical", "deep learning",
-            "--max", "5",
-            "--min-citations", "500",
-        ])
+        args = parser.parse_args(
+            [
+                "canonical",
+                "deep learning",
+                "--max",
+                "5",
+                "--min-citations",
+                "500",
+            ]
+        )
         assert args.command == "canonical"
         assert args.query == "deep learning"
         assert args.max == 5
@@ -119,12 +134,17 @@ class TestCLIArgParsing:
         from opencite.cli import create_parser
 
         parser = create_parser()
-        args = parser.parse_args([
-            "pdf", "10.1234/test",
-            "-o", "/tmp/papers",
-            "--convert",
-            "--converter", "mistral",
-        ])
+        args = parser.parse_args(
+            [
+                "pdf",
+                "10.1234/test",
+                "-o",
+                "/tmp/papers",
+                "--convert",
+                "--converter",
+                "mistral",
+            ]
+        )
         assert args.command == "pdf"
         assert args.id == "10.1234/test"
         assert args.output_dir == "/tmp/papers"

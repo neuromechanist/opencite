@@ -83,17 +83,25 @@ def merge_papers(existing: Paper, new: Paper) -> Paper:
     merged_sources = existing.data_sources | new.data_sources
 
     # Prefer longer abstract
-    abstract = existing.abstract if len(existing.abstract) >= len(new.abstract) else new.abstract
+    abstract = (
+        existing.abstract
+        if len(existing.abstract) >= len(new.abstract)
+        else new.abstract
+    )
 
     # Take TLDR from whichever has it
     tldr = existing.tldr or new.tldr
 
     # Prefer more authors
-    authors = existing.authors if len(existing.authors) >= len(new.authors) else new.authors
+    authors = (
+        existing.authors if len(existing.authors) >= len(new.authors) else new.authors
+    )
 
     # Higher citation count
     citation_count = max(existing.citation_count, new.citation_count)
-    influential = max(existing.influential_citation_count, new.influential_citation_count)
+    influential = max(
+        existing.influential_citation_count, new.influential_citation_count
+    )
 
     # Union PDF locations (deduplicated by URL)
     pdf_urls = {loc.url for loc in existing.pdf_locations}

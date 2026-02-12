@@ -74,7 +74,9 @@ class TestParsePubmedXml:
         papers = _parse_pubmed_xml(SAMPLE_XML)
         assert len(papers) == 1
         paper = papers[0]
-        assert paper.title == "Highly accurate protein structure prediction with AlphaFold"
+        assert (
+            paper.title == "Highly accurate protein structure prediction with AlphaFold"
+        )
         assert paper.ids.pmid == "34265844"
         assert paper.ids.doi == "10.1038/s41586-021-03819-2"
         assert paper.ids.pmcid == "PMC8371605"
@@ -149,17 +151,7 @@ class TestMonthToNum:
 
 class TestExtractLinkIds:
     def test_extracts_ids(self):
-        data = {
-            "linksets": [
-                {
-                    "linksetdbs": [
-                        {
-                            "links": ["111", "222", "333"]
-                        }
-                    ]
-                }
-            ]
-        }
+        data = {"linksets": [{"linksetdbs": [{"links": ["111", "222", "333"]}]}]}
         ids = _extract_link_ids(data)
         assert ids == ["111", "222", "333"]
 

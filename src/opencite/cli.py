@@ -142,6 +142,13 @@ def create_parser() -> argparse.ArgumentParser:
     ids_p.add_argument("id", nargs="+", help="identifiers to convert")
     ids_p.add_argument("-f", "--format", choices=["text", "json"], default="text")
 
+    # -- config --
+    config_p = subparsers.add_parser("config", help="manage opencite configuration")
+    config_sub = config_p.add_subparsers(dest="config_action")
+    config_sub.add_parser("init", help="create default ~/.opencite/config.toml")
+    config_sub.add_parser("show", help="show resolved configuration")
+    config_sub.add_parser("path", help="show config file location")
+
     return parser
 
 
@@ -162,6 +169,10 @@ def main() -> int:
         config = Config.from_env()
         config.log_level = "DEBUG"
     config.setup_logging()
+
+    # Config command doesn't need full config loading
+    if args.command == "config":
+        return _cmd_config(args)
 
     dispatch = {
         "search": _cmd_search,
@@ -279,7 +290,9 @@ async def _cmd_cite(args: argparse.Namespace, config: object) -> int:
     async with CitationExplorer(config) as explorer:
         if args.direction == "both":
             citing = await explorer.citing_papers(
-                args.id, max_results=args.max, sort=args.sort,
+                args.id,
+                max_results=args.max,
+                sort=args.sort,
                 min_citations=args.min_citations,
             )
             refs = await explorer.references(args.id, max_results=args.max)
@@ -289,7 +302,9 @@ async def _cmd_cite(args: argparse.Namespace, config: object) -> int:
             papers = result.papers
         else:
             result = await explorer.citing_papers(
-                args.id, max_results=args.max, sort=args.sort,
+                args.id,
+                max_results=args.max,
+                sort=args.sort,
                 min_citations=args.min_citations,
             )
             papers = result.papers
@@ -340,8 +355,7 @@ async def _cmd_ids(args: argparse.Namespace, config: object) -> int:
 
     if args.format == "json":
         data = [
-            {"doi": ids.doi, "pmid": ids.pmid, "pmcid": ids.pmcid}
-            for ids in id_sets
+            {"doi": ids.doi, "pmid": ids.pmid, "pmcid": ids.pmcid} for ids in id_sets
         ]
         print(json.dumps(data, indent=2))
     else:
@@ -401,6 +415,31 @@ async def _cmd_convert(args: argparse.Namespace, config: object) -> int:  # noqa
         print(f"Converted: {output_path}", file=sys.stderr)
 
     return 0
+
+
+def _cmd_config(args: argparse.Namespace) -> int:
+    """Handle the 'config' subcommand (sync, no async needed)."""
+    from opencite.config import Config, _resolve_config_path, create_default_config
+
+    if args.config_action == "init":
+        path = create_default_config()
+        print(f"Created config file: {path}")
+        print("Edit it to add your API keys.")
+        return 0
+
+    if args.config_action == "show":
+        config = Config.from_env()
+        print("Resolved configuration:")
+        print(config.show())
+        return 0
+
+    if args.config_action == "path":
+        print(_resolve_config_path())
+        return 0
+
+    # No subcommand given
+    print("Usage: opencite config {init,show,path}")
+    return 1
 
 
 def _write_output(output: str, filepath: str | None) -> None:

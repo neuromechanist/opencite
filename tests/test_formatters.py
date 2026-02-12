@@ -98,7 +98,15 @@ class TestCsvFormatter:
         f = CsvFormatter()
         output = f.format_single(paper)
         header = output.split("\n")[0]
-        for field in ["title", "authors", "year", "doi", "pmid", "journal", "citation_count"]:
+        for field in [
+            "title",
+            "authors",
+            "year",
+            "doi",
+            "pmid",
+            "journal",
+            "citation_count",
+        ]:
             assert field in header
 
     def test_csv_values(self):

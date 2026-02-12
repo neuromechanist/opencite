@@ -76,11 +76,7 @@ class OpenAlexClient(BaseClient):
 
         resp = await self.get("/works", params=params)
         data = resp.json()
-        return [
-            self._parse_work(w)
-            for w in data.get("results", [])
-            if w.get("title")
-        ]
+        return [self._parse_work(w) for w in data.get("results", []) if w.get("title")]
 
     async def lookup_doi(self, doi: str) -> Paper | None:
         """Look up a single paper by DOI."""
@@ -137,11 +133,7 @@ class OpenAlexClient(BaseClient):
 
         resp = await self.get("/works", params=params)
         data = resp.json()
-        return [
-            self._parse_work(w)
-            for w in data.get("results", [])
-            if w.get("title")
-        ]
+        return [self._parse_work(w) for w in data.get("results", []) if w.get("title")]
 
     async def references(self, openalex_id: str, max_results: int = 50) -> list[Paper]:
         """Find papers referenced by the given work."""
@@ -152,11 +144,7 @@ class OpenAlexClient(BaseClient):
         }
         resp = await self.get("/works", params=params)
         data = resp.json()
-        return [
-            self._parse_work(w)
-            for w in data.get("results", [])
-            if w.get("title")
-        ]
+        return [self._parse_work(w) for w in data.get("results", []) if w.get("title")]
 
     async def canonical_search(
         self,
@@ -183,11 +171,7 @@ class OpenAlexClient(BaseClient):
         }
         resp = await self.get("/works", params=params)
         data = resp.json()
-        return [
-            self._parse_work(w)
-            for w in data.get("results", [])
-            if w.get("title")
-        ]
+        return [self._parse_work(w) for w in data.get("results", []) if w.get("title")]
 
     async def batch_lookup_dois(self, dois: list[str]) -> list[Paper]:
         """Batch lookup up to 50 DOIs using filter pipe."""
@@ -225,7 +209,11 @@ class OpenAlexClient(BaseClient):
 
         # Extract PMID and PMCID from ids object
         ids_obj = work.get("ids") or {}
-        pmid = (ids_obj.get("pmid") or "").replace("https://pubmed.ncbi.nlm.nih.gov/", "").rstrip("/")
+        pmid = (
+            (ids_obj.get("pmid") or "")
+            .replace("https://pubmed.ncbi.nlm.nih.gov/", "")
+            .rstrip("/")
+        )
         pmcid = ids_obj.get("pmcid") or ""
 
         ids = IDSet(
@@ -247,17 +235,21 @@ class OpenAlexClient(BaseClient):
             if not name:
                 continue
             orcid = (author_obj.get("orcid") or "").replace("https://orcid.org/", "")
-            author_oa_id = (author_obj.get("id") or "").replace("https://openalex.org/", "")
+            author_oa_id = (author_obj.get("id") or "").replace(
+                "https://openalex.org/", ""
+            )
             parts = name.rsplit(None, 1)
             family = parts[-1] if parts else name
             given = parts[0] if len(parts) > 1 else ""
-            authors.append(Author(
-                name=name,
-                family_name=family,
-                given_name=given,
-                orcid=orcid,
-                openalex_id=author_oa_id,
-            ))
+            authors.append(
+                Author(
+                    name=name,
+                    family_name=family,
+                    given_name=given,
+                    orcid=orcid,
+                    openalex_id=author_oa_id,
+                )
+            )
 
         # Abstract
         abstract = reconstruct_abstract(work.get("abstract_inverted_index"))
@@ -266,11 +258,13 @@ class OpenAlexClient(BaseClient):
 
         # Source venue
         loc = work.get("primary_location") or {}
-        source_info = (loc.get("source") or {})
+        source_info = loc.get("source") or {}
         source_venue = None
         source_name = source_info.get("display_name", "")
         if source_name:
-            source_oa_id = (source_info.get("id") or "").replace("https://openalex.org/", "")
+            source_oa_id = (source_info.get("id") or "").replace(
+                "https://openalex.org/", ""
+            )
             source_venue = Source(
                 name=source_name,
                 issn=source_info.get("issn_l", "") or "",
@@ -356,40 +350,42 @@ def _extract_pdf_locations(work: dict) -> list[PDFLocation]:
     return locations
 
 
-def _add_location(
-    loc: dict, locations: list[PDFLocation], seen_urls: set[str]
-) -> None:
+def _add_location(loc: dict, locations: list[PDFLocation], seen_urls: set[str]) -> None:
     """Add a PDF location if it has a URL we haven't seen."""
     pdf_url = loc.get("pdf_url") or ""
     if not pdf_url or pdf_url in seen_urls:
         return
     seen_urls.add(pdf_url)
-    locations.append(PDFLocation(
-        url=pdf_url,
-        source="openalex",
-        version=loc.get("version") or "",
-        is_oa=loc.get("is_oa", False) or False,
-        license=loc.get("license") or "",
-    ))
+    locations.append(
+        PDFLocation(
+            url=pdf_url,
+            source="openalex",
+            version=loc.get("version") or "",
+            is_oa=loc.get("is_oa", False) or False,
+            license=loc.get("license") or "",
+        )
+    )
 
 
 # Fields to request (reduces payload size)
-_WORK_FIELDS = ",".join([
-    "id",
-    "doi",
-    "ids",
-    "title",
-    "abstract_inverted_index",
-    "publication_date",
-    "type",
-    "authorships",
-    "primary_location",
-    "best_oa_location",
-    "locations",
-    "cited_by_count",
-    "is_retracted",
-    "open_access",
-    "topics",
-    "mesh",
-    "funders",
-])
+_WORK_FIELDS = ",".join(
+    [
+        "id",
+        "doi",
+        "ids",
+        "title",
+        "abstract_inverted_index",
+        "publication_date",
+        "type",
+        "authorships",
+        "primary_location",
+        "best_oa_location",
+        "locations",
+        "cited_by_count",
+        "is_retracted",
+        "open_access",
+        "topics",
+        "mesh",
+        "funders",
+    ]
+)

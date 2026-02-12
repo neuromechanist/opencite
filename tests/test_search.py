@@ -87,9 +87,7 @@ class TestSearchOrchestrator:
 
     async def test_lookup_with_enrich(self, config: Config):
         async with SearchOrchestrator(config) as searcher:
-            paper = await searcher.lookup(
-                "10.1038/s41586-021-03819-2", enrich=True
-            )
+            paper = await searcher.lookup("10.1038/s41586-021-03819-2", enrich=True)
         assert paper is not None
         # Should have data from multiple sources
         assert len(paper.data_sources) >= 2
@@ -101,10 +99,12 @@ class TestSearchOrchestrator:
 
     async def test_batch_lookup(self, config: Config):
         async with SearchOrchestrator(config) as searcher:
-            papers = await searcher.batch_lookup([
-                "10.1038/s41586-021-03819-2",
-                "pmid:34265844",
-            ])
+            papers = await searcher.batch_lookup(
+                [
+                    "10.1038/s41586-021-03819-2",
+                    "pmid:34265844",
+                ]
+            )
         assert len(papers) >= 1
 
     async def test_source_counts(self, config: Config):

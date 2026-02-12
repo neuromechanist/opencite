@@ -125,17 +125,13 @@ class PDFRetriever:
             headers["Accept"] = "application/pdf"
 
         try:
-            async with httpx.AsyncClient(
-                timeout=60.0, follow_redirects=True
-            ) as client:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
 
                 content_type = resp.headers.get("content-type", "")
                 if "pdf" not in content_type and resp.content[:5] != b"%PDF-":
-                    logger.debug(
-                        "Response is not PDF (content-type: %s)", content_type
-                    )
+                    logger.debug("Response is not PDF (content-type: %s)", content_type)
                     return None
 
                 dest.write_bytes(resp.content)

@@ -31,8 +31,10 @@ opencite cite 10.1038/nature12345
 opencite pdf 10.1038/nature12345 -o paper.pdf --convert
 ```
 
+> [!NOTE]
 > **Claude Code plugin:** Type `/plugin`, select "Add marketplace", enter `neuromechanist/opencite`, and restart. Then use `/opencite` or ask Claude directly.
 
+> [!TIP]
 > **PDF conversion:** Install with `uv pip install 'opencite[convert]'` for markitdown and markit-mistral support.
 
 ## Commands

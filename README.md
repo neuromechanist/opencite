@@ -4,95 +4,16 @@ Academic literature search, citation management, and PDF retrieval CLI.
 
 Searches Semantic Scholar, OpenAlex, and PubMed in parallel, deduplicates results, and supports BibTeX output, citation graph traversal, PDF retrieval, batch downloads, and PDF-to-markdown conversion.
 
-## Installation
-
-```bash
-# uv (recommended)
-uv pip install opencite
-uv pip install 'opencite[convert]'     # with PDF conversion (markitdown + markit-mistral)
-
-# pip
-pip install opencite
-pip install 'opencite[convert]'
-
-# uvx (no install needed, runs from cache)
-uvx opencite --version
-```
-
-For development:
-
-```bash
-git clone https://github.com/neuromechanist/opencite.git
-cd opencite
-uv sync --extra dev
-```
-
-## Claude Code Plugin
-
-OpenCite is available as a [Claude Code](https://claude.ai/code) plugin, giving Claude direct access to academic literature search and citation management.
-
-To install:
-
-1. Open Claude Code
-2. Type `/plugin` and press Enter
-3. Select "Add marketplace"
-4. Enter `neuromechanist/opencite`
-5. Restart Claude Code
-
-Once installed, use `/opencite` or ask Claude to search for papers, look up DOIs, get BibTeX, etc.
-
 ## Quick Start
 
-```bash
-# Search for papers
-opencite search "transformer attention mechanism"
-
-# Look up a paper by DOI
-opencite lookup 10.1038/nature12345
-
-# Find most-cited papers in a field
-opencite canonical "deep learning for neuroscience" --min-citations 500
-
-# Get papers citing a specific work
-opencite cite 10.1038/nature12345
-
-# Download a PDF
-opencite pdf 10.1038/nature12345 -o paper.pdf
-
-# Download and convert to markdown in one step
-opencite pdf 10.1038/nature12345 -o paper.pdf --convert
-
-# Batch download from a file of DOIs
-opencite batch-fetch dois.txt --convert --summary report.json -o ./papers
-
-# Convert a local PDF to markdown
-opencite convert paper.pdf -o paper.md
-```
-
-## Configuration
-
-OpenCite supports TOML config, `.env` files, and environment variables.
-
-### Quick setup
+Install and set up your API keys:
 
 ```bash
-opencite config init    # creates ~/.opencite/config.toml with template
-opencite config show    # display resolved config (keys masked)
-opencite config path    # show config file location
+uv pip install opencite                # or: pip install opencite
+opencite config init                   # creates ~/.opencite/config.toml
 ```
 
-### Config loading priority
-
-Later sources override earlier ones:
-
-1. `~/.opencite/config.toml`
-2. `~/.opencite/.env`
-3. `.env` in working directory
-4. Environment variables
-
-### API keys
-
-Required for academic database access:
+Add your API keys to `~/.opencite/config.toml` or export them as environment variables:
 
 ```bash
 export SEMANTIC_SCHOLAR_API_KEY=your_key
@@ -100,30 +21,19 @@ export PUBMED_API_KEY=your_key
 export OPENALEX_API_KEY=your_key
 ```
 
-Optional:
+Start searching:
 
 ```bash
-export MISTRAL_API_KEY=your_key        # for PDF-to-markdown via Mistral OCR
+opencite search "transformer attention mechanism"
+opencite lookup 10.1038/nature12345
+opencite canonical "deep learning" --min-citations 500
+opencite cite 10.1038/nature12345
+opencite pdf 10.1038/nature12345 -o paper.pdf --convert
 ```
 
-### Publisher tokens (optional)
+> **Claude Code plugin:** Type `/plugin`, select "Add marketplace", enter `neuromechanist/opencite`, and restart. Then use `/opencite` or ask Claude directly.
 
-For authenticated PDF downloads from paywalled publishers:
-
-```bash
-export ELSEVIER_API_KEY=your_key       # Elsevier/ScienceDirect
-export WILEY_TDM_TOKEN=your_token      # Wiley TDM
-export SPRINGER_API_KEY=your_key       # Springer Nature
-```
-
-These can also be set in `~/.opencite/config.toml`:
-
-```toml
-[publishers]
-elsevier = "your_key"
-wiley_tdm = "your_token"
-springer = "your_key"
-```
+> **PDF conversion:** Install with `uv pip install 'opencite[convert]'` for markitdown and markit-mistral support.
 
 ## Commands
 
@@ -220,6 +130,83 @@ All search/lookup/cite/canonical commands support `-f`/`--format`:
 - `csv` - comma-separated values (search only)
 
 Use `-o`/`--output FILE` to write to a file instead of stdout.
+
+## Installation
+
+```bash
+# uv (recommended)
+uv pip install opencite
+uv pip install 'opencite[convert]'     # with PDF conversion (markitdown + markit-mistral)
+
+# pip
+pip install opencite
+pip install 'opencite[convert]'
+
+# uvx (no install needed, runs from cache)
+uvx opencite --version
+```
+
+For development:
+
+```bash
+git clone https://github.com/neuromechanist/opencite.git
+cd opencite
+uv sync --extra dev
+```
+
+## Configuration
+
+OpenCite supports TOML config, `.env` files, and environment variables.
+
+```bash
+opencite config init    # creates ~/.opencite/config.toml with template
+opencite config show    # display resolved config (keys masked)
+opencite config path    # show config file location
+```
+
+### Config loading priority
+
+Later sources override earlier ones:
+
+1. `~/.opencite/config.toml`
+2. `~/.opencite/.env`
+3. `.env` in working directory
+4. Environment variables
+
+### API keys
+
+Required for academic database access:
+
+```bash
+export SEMANTIC_SCHOLAR_API_KEY=your_key
+export PUBMED_API_KEY=your_key
+export OPENALEX_API_KEY=your_key
+```
+
+Optional:
+
+```bash
+export MISTRAL_API_KEY=your_key        # for PDF-to-markdown via Mistral OCR
+```
+
+### Publisher tokens (optional)
+
+For authenticated PDF downloads from paywalled publishers:
+
+```bash
+export ELSEVIER_API_KEY=your_key       # Elsevier/ScienceDirect
+export WILEY_TDM_TOKEN=your_token      # Wiley TDM
+export SPRINGER_API_KEY=your_key       # Springer Nature
+```
+
+These can also be set in `~/.opencite/config.toml`:
+
+```toml
+[publishers]
+elsevier = "your_key"
+wiley_tdm = "your_token"
+springer = "your_key"
+```
 
 ## License
 

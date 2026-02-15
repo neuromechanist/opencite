@@ -1,6 +1,6 @@
 {
   "name": "opencite",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Academic literature search, citation management, and PDF retrieval using the opencite CLI",
   "author": {
     "name": "Seyed Yahya Shirazi",

@@ -90,18 +90,20 @@ def _convert_with_mistral(
 ) -> str:
     """Convert using markit-mistral (API-based, better for complex layouts)."""
     try:
-        from markit_mistral import MarkitMistral
+        from markit_mistral import MarkItMistral
     except ImportError as e:
         raise ImportError(
             "markit-mistral>=0.2.0 is required for Mistral PDF conversion. "
             "Install with: uv pip install opencite[convert]"
         ) from e
 
-    kwargs: dict[str, str] = {}
+    kwargs: dict[str, object] = {}
     if api_key:
         kwargs["api_key"] = api_key
+    if extract_images:
+        kwargs["include_images"] = True
 
-    converter = MarkitMistral(**kwargs)
+    converter = MarkItMistral(**kwargs)
 
     if extract_images and output_path:
         # Use convert_file for full output with images
@@ -111,7 +113,6 @@ def _convert_with_mistral(
             pdf_path,
             output_path=out,
             output_dir=output_dir,
-            extract_images=True,
         )
         if not out.exists():
             raise RuntimeError(

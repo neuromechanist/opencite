@@ -1,7 +1,7 @@
 ---
 name: OpenCite CLI
 description: This skill should be used when the user asks to "search for papers", "find citations", "look up a DOI", "get BibTeX", "download PDF", "convert PDF to markdown", "find canonical papers", "convert identifiers", "batch download papers", "configure opencite", or mentions opencite, academic literature search, citation management, or paper retrieval.
-version: 0.2.0
+version: 0.2.1
 ---
 
 # OpenCite CLI Reference
@@ -12,12 +12,10 @@ OpenCite is a CLI tool and Python library for academic literature search and cit
 
 ```bash
 # Option 1: uv (recommended)
-uv pip install opencite                 # install globally
-uv pip install 'opencite[convert]'      # with PDF conversion support (markitdown + markit-mistral)
+uv pip install opencite                 # includes PDF conversion support (markitdown + markit-mistral)
 
 # Option 2: pip
 pip install opencite
-pip install 'opencite[convert]'
 
 # Option 3: uvx (no install needed, runs from cache)
 uvx opencite --version

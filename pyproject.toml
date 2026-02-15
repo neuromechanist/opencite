@@ -28,13 +28,13 @@ dependencies = [
     "httpx>=0.27.0",
     "pyalex>=0.15",
     "markitdown>=0.1.0",
-    "markit-mistral>=0.2.1",
+    "markit-mistral>=0.2.2",
 ]
 
 [project.optional-dependencies]
 convert = [
     "markitdown>=0.1.0",
-    "markit-mistral>=0.2.1",
+    "markit-mistral>=0.2.2",
 ]
 dev = [
     "pytest>=8.0.0",

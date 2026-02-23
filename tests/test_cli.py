@@ -199,7 +199,15 @@ class TestCLIArgParsing:
 
         parser = create_parser()
         args = parser.parse_args(
-            ["batch-fetch", "dois.txt", "-o", "./papers", "--convert", "--concurrency", "5"]
+            [
+                "batch-fetch",
+                "dois.txt",
+                "-o",
+                "./papers",
+                "--convert",
+                "--concurrency",
+                "5",
+            ]
         )
         assert args.command == "batch-fetch"
         assert args.file == "dois.txt"

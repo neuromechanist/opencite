@@ -35,8 +35,7 @@ class BatchResult:
             "converted": self.converted,
             "failed": [{"id": id_, "reason": reason} for id_, reason in self.failed],
             "conversion_failed": [
-                {"id": id_, "reason": reason}
-                for id_, reason in self.conversion_failed
+                {"id": id_, "reason": reason} for id_, reason in self.conversion_failed
             ],
         }
 
@@ -135,9 +134,7 @@ async def batch_download(
         pdf_dir = out
         pdf_dir.mkdir(parents=True, exist_ok=True)
 
-    async def _process_one(
-        identifier: str, retriever: PDFRetriever
-    ) -> None:
+    async def _process_one(identifier: str, retriever: PDFRetriever) -> None:
         async with semaphore:
             try:
                 path = await retriever.download(
@@ -180,9 +177,7 @@ async def batch_download(
                 print(f"  FAIL: {identifier} ({e})", file=sys.stderr)
 
     async with PDFRetriever(config) as retriever:
-        tasks = [
-            asyncio.create_task(_process_one(id_, retriever)) for id_ in ids
-        ]
+        tasks = [asyncio.create_task(_process_one(id_, retriever)) for id_ in ids]
         await asyncio.gather(*tasks)
 
     return result

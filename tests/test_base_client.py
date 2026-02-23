@@ -1,0 +1,68 @@
+"""Tests for opencite.clients.base (RateLimiter, no API)."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+
+import pytest
+
+from opencite.clients.base import RateLimiter
+
+
+class TestRateLimiter:
+    @pytest.mark.asyncio
+    async def test_initial_burst_allows_immediate_calls(self):
+        rl = RateLimiter(rate=10.0, burst=3)
+        # Should be able to acquire burst count immediately
+        for _ in range(3):
+            await rl.acquire()
+        # Tokens should be exhausted now
+        assert rl._tokens < 1.0
+
+    @pytest.mark.asyncio
+    async def test_single_token_burst(self):
+        rl = RateLimiter(rate=100.0, burst=1)
+        start = time.monotonic()
+        await rl.acquire()
+        elapsed = time.monotonic() - start
+        assert elapsed < 0.05  # First call should be near-instant
+
+    @pytest.mark.asyncio
+    async def test_rate_limits_after_burst(self):
+        rl = RateLimiter(rate=100.0, burst=1)
+        await rl.acquire()
+        # Second call should need to wait for token refill
+        start = time.monotonic()
+        await rl.acquire()
+        elapsed = time.monotonic() - start
+        # At 100 req/s, wait should be ~0.01s; allow generous margin
+        assert elapsed < 0.5
+
+    @pytest.mark.asyncio
+    async def test_tokens_refill_over_time(self):
+        rl = RateLimiter(rate=1000.0, burst=5)
+        # Drain all tokens
+        for _ in range(5):
+            await rl.acquire()
+        # Wait a bit for refill
+        await asyncio.sleep(0.01)
+        # Should be able to acquire again
+        await rl.acquire()
+
+    @pytest.mark.asyncio
+    async def test_tokens_capped_at_burst(self):
+        rl = RateLimiter(rate=1000.0, burst=3)
+        # Wait long enough that many tokens would accumulate
+        await asyncio.sleep(0.05)
+        # Acquire burst + 1 to verify cap
+        for _ in range(3):
+            await rl.acquire()
+        # The 4th should require waiting
+        assert rl._tokens < 1.0
+
+    def test_init_values(self):
+        rl = RateLimiter(rate=10.0, burst=5)
+        assert rl.rate == 10.0
+        assert rl.burst == 5
+        assert rl._tokens == 5.0

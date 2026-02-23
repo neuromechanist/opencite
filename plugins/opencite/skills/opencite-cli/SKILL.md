@@ -1,18 +1,18 @@
 ---
 name: OpenCite CLI
 description: This skill should be used when the user asks to "search for papers", "find citations", "look up a DOI", "get BibTeX", "download PDF", "convert PDF to markdown", "find canonical papers", "convert identifiers", "batch download papers", "configure opencite", or mentions opencite, academic literature search, citation management, or paper retrieval.
-version: 0.2.2
+version: 0.2.3
 ---
 
 # OpenCite CLI Reference
 
-OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, and PubMed, deduplicates them, and outputs formatted results. It also supports PDF retrieval, PDF-to-markdown conversion, and batch operations.
+OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, and PubMed, deduplicates them, and outputs formatted results. It also supports PDF retrieval, PDF-to-markdown conversion (included by default), and batch operations.
 
 ## Installation
 
 ```bash
 # Option 1: uv (recommended)
-uv pip install opencite                 # includes PDF conversion support (markitdown + markit-mistral)
+uv pip install opencite
 
 # Option 2: pip
 pip install opencite
@@ -20,6 +20,8 @@ pip install opencite
 # Option 3: uvx (no install needed, runs from cache)
 uvx opencite --version
 ```
+
+PDF conversion support (markitdown and markit-mistral) is included by default. If `MISTRAL_API_KEY` is set, markit-mistral is used for better handling of math, tables, and complex layouts. Otherwise, markitdown (free, local) is used as the fallback.
 
 For development:
 ```bash
@@ -47,13 +49,73 @@ Config loading priority (later overrides earlier):
 - `SEMANTIC_SCHOLAR_API_KEY` - Semantic Scholar API
 - `PUBMED_API_KEY` - NCBI/PubMed API
 - `OPENALEX_API_KEY` - OpenAlex API (required since Feb 2026)
-- `MISTRAL_API_KEY` - (optional) Mistral AI for enhanced PDF-to-markdown
+- `MISTRAL_API_KEY` - (optional) Mistral AI for enhanced PDF-to-markdown conversion
 
 ### Publisher Tokens (optional, for authenticated PDF access)
 
 - `ELSEVIER_API_KEY` - Elsevier/ScienceDirect
 - `WILEY_TDM_TOKEN` - Wiley TDM
 - `SPRINGER_API_KEY` - Springer Nature
+
+## Research Workflow
+
+When the user asks for literature research, paper retrieval, or reading material on a topic, follow this end-to-end workflow.
+
+### 1. Search for relevant papers
+
+Choose the search strategy based on user needs:
+
+- **Canonical/foundational papers**: `uvx opencite canonical "topic" --max 10`
+- **Recent or specific papers**: `uvx opencite search "query" --max 20 --sort citations`
+- **Citation graph exploration**: `uvx opencite cite "DOI" --direction both`
+- Combine strategies when appropriate (e.g., canonical for background + search for recent work)
+
+### 2. Evaluate and select papers
+
+Review results considering citation count, relevance, recency, and open access availability. Present a summary to the user and confirm which papers to retrieve.
+
+### 3. Set up folder structure
+
+Create a `papers/` directory in the working directory:
+
+```
+papers/
+├── pdf/          # downloaded PDFs
+└── markdown/     # converted markdown files
+    └── img/      # images extracted during conversion
+```
+
+```bash
+mkdir -p papers/pdf papers/markdown/img
+```
+
+### 4. Download and convert
+
+**For multiple papers (preferred):** Save search results as JSON and use batch-fetch:
+
+```bash
+uvx opencite search "topic" --max 10 -f json -o results.json
+uvx opencite batch-fetch --from-json results.json --convert -o ./papers --summary report.json
+```
+
+When `batch-fetch` is used with `--convert`, it automatically organizes output into `pdf/`, `markdown/`, and `markdown/img/` subdirectories within the output directory.
+
+**For individual papers:**
+
+```bash
+uvx opencite pdf "10.1234/example" -o papers/pdf/ --convert --converter auto
+```
+
+For single-paper downloads, you may need to move the generated markdown to `papers/markdown/` manually.
+
+### 5. Read and synthesize
+
+Read the converted markdown files from `papers/markdown/` for deeper analysis:
+
+- Summarize key findings across papers
+- Identify common themes and disagreements
+- Extract relevant figures (available in `papers/markdown/img/`)
+- Generate BibTeX for citation: `uvx opencite lookup "DOI" -f bibtex --append-bib refs.bib`
 
 ## Commands
 
@@ -140,7 +202,7 @@ Options:
 uvx opencite convert FILE.pdf [options]
 ```
 
-Uses markitdown (free, local) by default. If `MISTRAL_API_KEY` is set, auto mode selects markit-mistral for better math/complex layout handling.
+Auto mode uses markit-mistral when `MISTRAL_API_KEY` is set (better for math and complex layouts), otherwise falls back to markitdown (free, local). Both converters are included by default.
 
 Options:
 - `-o, --output FILE` - Output markdown path
@@ -167,7 +229,14 @@ uvx opencite batch-fetch --from-json FILE [options]
 uvx opencite batch-fetch --from-stdin [options]
 ```
 
-Downloads PDFs for multiple papers with controlled concurrency.
+Downloads PDFs for multiple papers with controlled concurrency. When `--convert` is used, output is organized into subdirectories:
+
+```
+output-dir/
+├── pdf/          # downloaded PDFs
+└── markdown/     # converted markdown files
+    └── img/      # extracted images
+```
 
 Input sources (mutually exclusive):
 - Positional `FILE` - Text file with IDs, one per line
@@ -212,25 +281,18 @@ uvx opencite cite "10.1038/s41586-024-07487-w" --direction citing --max 20
 uvx opencite cite "10.1038/s41586-024-07487-w" --direction references --max 20
 ```
 
-### Find foundational papers and download
+### Full research pipeline: search, download, convert, read
 ```bash
-# Find canonical papers
-uvx opencite canonical "attention mechanism" --max 5
+# 1. Find canonical papers in the field
+uvx opencite canonical "attention mechanism" --max 5 -f json -o results.json
 
-# Download and convert in one step
-uvx opencite pdf "10.1234/example" -o attention.pdf --convert
-```
+# 2. Batch download and convert all found papers
+uvx opencite batch-fetch --from-json results.json --convert -o ./papers --summary report.json
 
-### Batch workflow: search then download all
-```bash
-# Search and save results as JSON
-uvx opencite search "tDCS motor cortex" --max 30 -f json -o results.json
-
-# Batch download all PDFs with conversion
-uvx opencite batch-fetch --from-json results.json --convert --summary report.json -o ./papers
-
-# Or from a simple text file of DOIs
-uvx opencite batch-fetch dois.txt --convert -o ./papers
+# 3. Papers are now organized in:
+#    papers/pdf/       - PDF files
+#    papers/markdown/  - Markdown files ready for reading
+#    papers/markdown/img/ - Extracted figures and images
 ```
 
 ### Cross-reference identifier conversion

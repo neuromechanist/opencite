@@ -206,6 +206,67 @@ class TestParseIdentifier:
         assert id_type == IDType.ARXIV
         assert value == "2106.15928"
 
+    def test_arxiv_prefix_uppercase(self):
+        id_type, value = parse_identifier("arXiv:1706.03762")
+        assert id_type == IDType.ARXIV
+        assert value == "1706.03762"
+
+    def test_arxiv_prefix_strips_version(self):
+        id_type, value = parse_identifier("arxiv:2106.15928v3")
+        assert id_type == IDType.ARXIV
+        assert value == "2106.15928"
+
+    def test_arxiv_bare_new_style_id(self):
+        """YYMM.NNNNN format should be detected as arXiv."""
+        id_type, value = parse_identifier("2106.15928")
+        assert id_type == IDType.ARXIV
+        assert value == "2106.15928"
+
+    def test_arxiv_bare_new_style_id_with_version(self):
+        id_type, value = parse_identifier("1706.03762v2")
+        assert id_type == IDType.ARXIV
+        assert value == "1706.03762"
+
+    def test_arxiv_bare_old_style_id(self):
+        """cs.LG/YYMMNNN format should be detected as arXiv."""
+        id_type, value = parse_identifier("cs.LG/0101001")
+        assert id_type == IDType.ARXIV
+        assert value == "cs.LG/0101001"
+
+    def test_arxiv_url_abs(self):
+        id_type, value = parse_identifier("https://arxiv.org/abs/2106.15928")
+        assert id_type == IDType.ARXIV
+        assert value == "2106.15928"
+
+    def test_arxiv_url_pdf(self):
+        id_type, value = parse_identifier("https://arxiv.org/pdf/1706.03762v2")
+        assert id_type == IDType.ARXIV
+        assert value == "1706.03762"
+
+    def test_arxiv_url_http(self):
+        """Old-style http:// arXiv URLs should work."""
+        id_type, value = parse_identifier("http://arxiv.org/abs/1706.03762")
+        assert id_type == IDType.ARXIV
+        assert value == "1706.03762"
+
+    def test_biorxiv_url_extracts_doi(self):
+        url = "https://www.biorxiv.org/content/10.1101/2021.01.01.425001v2"
+        id_type, value = parse_identifier(url)
+        assert id_type == IDType.DOI
+        assert value == "10.1101/2021.01.01.425001"
+
+    def test_medrxiv_url_extracts_doi(self):
+        url = "https://www.medrxiv.org/content/10.1101/2021.12.01.21266592v1.full"
+        id_type, value = parse_identifier(url)
+        assert id_type == IDType.DOI
+        assert value == "10.1101/2021.12.01.21266592"
+
+    def test_biorxiv_doi_as_plain_doi(self):
+        """10.1101/ DOIs are standard DOIs and should parse as DOI."""
+        id_type, value = parse_identifier("10.1101/837021")
+        assert id_type == IDType.DOI
+        assert value == "10.1101/837021"
+
     def test_openalex_id(self):
         id_type, value = parse_identifier("W2741809807")
         assert id_type == IDType.OPENALEX

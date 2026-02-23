@@ -151,13 +151,32 @@ class PDFRetriever:
                 if loc.url and loc.url not in urls:
                     urls.append(loc.url)
 
-            # Priority 3: PMC URL if PMCID known
+            # Priority 3a: Direct arXiv PDF (always works for OA preprints)
+            arxiv_id = paper.ids.arxiv_id
+            if arxiv_id:
+                arxiv_pdf = f"https://arxiv.org/pdf/{arxiv_id}"
+                if arxiv_pdf not in urls:
+                    urls.append(arxiv_pdf)
+
+            # Priority 3b: PMC URL if PMCID known
             if paper.pmcid:
                 pmc_url = _PMC_OA_URL.format(pmcid=paper.pmcid)
                 if pmc_url not in urls:
                     urls.append(pmc_url)
 
-        # Priority 4: DOI content negotiation
+        # Priority 4a: Direct bioRxiv/medRxiv PDF for 10.1101/ DOIs
+        if doi and doi.startswith("10.1101/"):
+            preprint_server = "biorxiv"
+            if paper and (
+                "medrxiv" in paper.data_sources
+                or (paper.source_venue and "medrxiv" in paper.source_venue.name.lower())
+            ):
+                preprint_server = "medrxiv"
+            preprint_pdf = f"https://www.{preprint_server}.org/content/{doi}v1.full.pdf"
+            if preprint_pdf not in urls:
+                urls.append(preprint_pdf)
+
+        # Priority 4b: DOI content negotiation
         if doi:
             doi_url = f"https://doi.org/{doi}"
             if doi_url not in urls:

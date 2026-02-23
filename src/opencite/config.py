@@ -166,6 +166,8 @@ class Config:
     openalex_rate_limit: float = 100.0
     s2_rate_limit: float = 1.0
     pubmed_rate_limit: float = 10.0
+    arxiv_rate_limit: float = 3.0
+    biorxiv_rate_limit: float = 10.0
 
     # Request settings
     timeout: float = 30.0

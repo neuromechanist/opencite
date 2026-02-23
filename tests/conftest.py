@@ -6,8 +6,14 @@ import os
 
 import pytest
 
-from opencite.config import Config
+from opencite.config import Config, _load_all_dotenv
 from opencite.models import Author, IDSet, Paper, Source
+
+# Load .env files into os.environ BEFORE skipif decorators evaluate.
+# This is necessary because pytest.mark.skipif evaluates its condition
+# at import time, before Config.from_env() would normally run.
+for _key, _value in _load_all_dotenv().items():
+    os.environ.setdefault(_key, _value)
 
 
 @pytest.fixture
@@ -69,4 +75,15 @@ skip_without_pubmed_key = pytest.mark.skipif(
 skip_without_openalex_key = pytest.mark.skipif(
     not has_api_key("OPENALEX_API_KEY"),
     reason="OPENALEX_API_KEY not set",
+)
+
+_ALL_API_KEYS = (
+    "SEMANTIC_SCHOLAR_API_KEY",
+    "PUBMED_API_KEY",
+    "OPENALEX_API_KEY",
+)
+
+skip_without_all_keys = pytest.mark.skipif(
+    not all(os.environ.get(k) for k in _ALL_API_KEYS),
+    reason="Not all API keys set (need S2, PubMed, OpenAlex)",
 )

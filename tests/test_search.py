@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from opencite.config import Config
 from opencite.models import Paper
 from opencite.search import SearchOrchestrator, _sort_papers
+from tests.conftest import skip_without_all_keys
 
 
 @pytest.fixture
@@ -53,20 +52,6 @@ class TestSortPapers:
         ]
         sorted_papers = _sort_papers(papers, "year")
         assert sorted_papers[0].title == "Has Year"
-
-
-def has_all_keys() -> bool:
-    """Check if all API keys are available."""
-    return all(
-        os.environ.get(k)
-        for k in ("SEMANTIC_SCHOLAR_API_KEY", "PUBMED_API_KEY", "OPENALEX_API_KEY")
-    )
-
-
-skip_without_all_keys = pytest.mark.skipif(
-    not has_all_keys(),
-    reason="Not all API keys set",
-)
 
 
 @pytest.mark.integration

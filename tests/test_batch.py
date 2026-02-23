@@ -9,6 +9,7 @@ import pytest
 
 from opencite.batch import (
     BatchResult,
+    prepare_output_dirs,
     read_ids_from_file,
     read_ids_from_json,
 )
@@ -110,3 +111,52 @@ class TestReadIdsFromJson:
             f.flush()
             with pytest.raises(ValueError, match="Invalid JSON"):
                 read_ids_from_json(f.name)
+
+
+class TestPrepareOutputDirs:
+    def test_convert_true_creates_subdirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf_dir, md_dir, img_dir = prepare_output_dirs(tmp, convert=True)
+            assert pdf_dir.is_dir()
+            assert pdf_dir.name == "pdf"
+            assert md_dir is not None
+            assert md_dir.is_dir()
+            assert md_dir.name == "markdown"
+            assert img_dir is not None
+            assert img_dir.is_dir()
+            assert img_dir.name == "img"
+            assert img_dir.parent == md_dir
+
+    def test_convert_false_flat_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path
+
+            pdf_dir, md_dir, img_dir = prepare_output_dirs(tmp, convert=False)
+            assert pdf_dir == Path(tmp)
+            assert pdf_dir.is_dir()
+            assert md_dir is None
+            assert img_dir is None
+            assert not (Path(tmp) / "pdf").exists()
+            assert not (Path(tmp) / "markdown").exists()
+
+    def test_convert_true_nested_output_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from pathlib import Path
+
+            nested = Path(tmp) / "deep" / "nested" / "papers"
+            pdf_dir, md_dir, img_dir = prepare_output_dirs(str(nested), convert=True)
+            assert pdf_dir.is_dir()
+            assert pdf_dir == nested / "pdf"
+            assert md_dir is not None
+            assert md_dir == nested / "markdown"
+            assert img_dir is not None
+            assert img_dir == nested / "markdown" / "img"
+
+    def test_convert_true_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # Calling twice should not fail (exist_ok=True)
+            pdf1, md1, img1 = prepare_output_dirs(tmp, convert=True)
+            pdf2, md2, img2 = prepare_output_dirs(tmp, convert=True)
+            assert pdf1 == pdf2
+            assert md1 == md2
+            assert img1 == img2

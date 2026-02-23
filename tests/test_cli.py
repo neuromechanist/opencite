@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
+
+import pytest
+
+from tests.conftest import skip_without_all_keys
 
 
 class TestCLIVersion:
@@ -550,3 +555,103 @@ class TestMainErrorHandling:
             assert "Error" in captured.err
         finally:
             sys.argv = orig
+
+
+@pytest.mark.integration
+@skip_without_all_keys
+class TestCLIIntegration:
+    """Integration tests that run CLI subcommands via subprocess."""
+
+    def test_search_openalex(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "opencite",
+                "search",
+                "AlphaFold protein",
+                "--max",
+                "3",
+                "--source",
+                "openalex",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0
+        assert len(result.stdout.strip()) > 0
+
+    def test_search_json_format(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "opencite",
+                "search",
+                "transformer",
+                "--max",
+                "3",
+                "-f",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+    def test_lookup_doi(self):
+        result = subprocess.run(
+            [sys.executable, "-m", "opencite", "lookup", "10.1038/s41586-021-03819-2"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0
+        assert (
+            "protein" in result.stdout.lower() or "alphafold" in result.stdout.lower()
+        )
+
+    def test_canonical_search(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "opencite",
+                "canonical",
+                "deep learning",
+                "--max",
+                "3",
+                "--min-citations",
+                "5000",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0
+        assert len(result.stdout.strip()) > 0
+
+    def test_cite_citing(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "opencite",
+                "cite",
+                "10.1038/s41586-021-03819-2",
+                "--max",
+                "3",
+                "--direction",
+                "citing",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0
+        assert len(result.stdout.strip()) > 0

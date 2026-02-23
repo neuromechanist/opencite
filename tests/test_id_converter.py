@@ -1,4 +1,4 @@
-"""Tests for opencite.clients.id_converter (unit tests, no API)."""
+"""Tests for opencite.clients.id_converter."""
 
 from __future__ import annotations
 
@@ -45,3 +45,9 @@ class TestGroupIdsByType:
         assert len(groups) == 1
         assert "pmid" in groups
         assert len(groups["pmid"]) == 3
+
+
+# NOTE: IDConverterClient integration tests omitted because pmc.ncbi.nlm.nih.gov
+# blocks httpx requests (bot detection via TLS fingerprinting). The API works
+# with curl but not from Python HTTP clients. If this is fixed upstream,
+# integration tests should be added here.

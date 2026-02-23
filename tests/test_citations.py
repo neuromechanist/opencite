@@ -1,9 +1,13 @@
-"""Tests for opencite.citations (unit tests, no API)."""
+"""Tests for opencite.citations."""
 
 from __future__ import annotations
 
-from opencite.citations import _gather_papers, _make_ids, _sort_papers
+import pytest
+
+from opencite.citations import CitationExplorer, _gather_papers, _make_ids, _sort_papers
+from opencite.config import Config
 from opencite.models import IDSet, IDType, Paper
+from tests.conftest import skip_without_all_keys
 
 
 class TestMakeIds:
@@ -112,3 +116,69 @@ class TestGatherPapers:
     async def test_empty_tasks(self):
         result = await _gather_papers([])
         assert result == []
+
+
+@pytest.fixture
+def config() -> Config:
+    return Config.from_env()
+
+
+@pytest.mark.integration
+@skip_without_all_keys
+class TestCitationExplorerIntegration:
+    async def test_citing_papers_by_doi(self, config: Config):
+        # AlphaFold paper
+        async with CitationExplorer(config) as explorer:
+            result = await explorer.citing_papers(
+                "10.1038/s41586-021-03819-2", max_results=5
+            )
+        assert result.seed_paper is not None
+        assert result.seed_paper.title
+        assert result.direction == "citing"
+        assert len(result.papers) > 0
+
+    async def test_references_by_doi(self, config: Config):
+        async with CitationExplorer(config) as explorer:
+            result = await explorer.references(
+                "10.1038/s41586-021-03819-2", max_results=5
+            )
+        assert result.direction == "references"
+        assert len(result.papers) > 0
+
+    async def test_canonical_papers(self, config: Config):
+        async with CitationExplorer(config) as explorer:
+            papers = await explorer.canonical_papers(
+                "deep learning", max_results=3, min_citations=1000
+            )
+        assert len(papers) > 0
+        for p in papers:
+            assert p.citation_count >= 1000
+
+    async def test_citing_papers_nonexistent_doi(self, config: Config):
+        async with CitationExplorer(config) as explorer:
+            result = await explorer.citing_papers("10.9999/does-not-exist-xyz")
+        assert result.seed_paper.title == "Unknown"
+        assert result.papers == []
+
+    async def test_citing_papers_with_min_citations(self, config: Config):
+        async with CitationExplorer(config) as explorer:
+            result = await explorer.citing_papers(
+                "10.1038/s41586-021-03819-2",
+                max_results=10,
+                min_citations=100,
+            )
+        for p in result.papers:
+            assert p.citation_count >= 100
+
+    async def test_citing_papers_by_pmid(self, config: Config):
+        async with CitationExplorer(config) as explorer:
+            result = await explorer.citing_papers("pmid:34265844", max_results=5)
+        assert result.seed_paper is not None
+        assert len(result.papers) >= 0  # may vary
+
+    async def test_references_by_arxiv(self, config: Config):
+        # "Attention Is All You Need"
+        async with CitationExplorer(config) as explorer:
+            result = await explorer.references("arxiv:1706.03762", max_results=5)
+        assert result.seed_paper is not None
+        assert result.direction == "references"

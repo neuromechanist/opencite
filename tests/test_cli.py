@@ -435,3 +435,118 @@ class TestMainErrorHandling:
             assert "Created config file" in captured.out
         finally:
             sys.argv = orig
+
+    def test_convert_file_not_found(self, capsys):
+        """main() convert subcommand handles FileNotFoundError."""
+        import sys
+
+        from opencite.cli import main
+
+        orig = sys.argv
+        sys.argv = ["opencite", "convert", "/nonexistent/paper.pdf"]
+        try:
+            result = main()
+            assert result == 1
+            captured = capsys.readouterr()
+            assert "Error" in captured.err
+        finally:
+            sys.argv = orig
+
+    def test_convert_to_stdout(self, capsys, tmp_path, monkeypatch):
+        """main() convert subcommand outputs to stdout without -o."""
+        import sys
+
+        import opencite.convert as conv
+        from opencite.cli import main
+
+        monkeypatch.setattr(conv, "convert_pdf", lambda *_a, **_kw: "# Output")
+
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake content")
+
+        orig = sys.argv
+        sys.argv = ["opencite", "convert", str(pdf)]
+        try:
+            result = main()
+            assert result == 0
+            captured = capsys.readouterr()
+            assert "# Output" in captured.out
+        finally:
+            sys.argv = orig
+
+    def test_convert_to_file(self, capsys, tmp_path, monkeypatch):
+        """main() convert subcommand writes to file with -o."""
+        import sys
+
+        import opencite.convert as conv
+        from opencite.cli import main
+
+        monkeypatch.setattr(conv, "convert_pdf", lambda *_a, **_kw: "# File Output")
+
+        pdf = tmp_path / "test.pdf"
+        pdf.write_bytes(b"%PDF-1.4 fake content")
+        out = tmp_path / "test.md"
+
+        orig = sys.argv
+        sys.argv = ["opencite", "convert", str(pdf), "-o", str(out)]
+        try:
+            result = main()
+            assert result == 0
+            captured = capsys.readouterr()
+            assert "Converted" in captured.err
+        finally:
+            sys.argv = orig
+
+    def test_batch_fetch_file_not_found(self, capsys):
+        """batch-fetch with nonexistent file returns error."""
+        import sys
+
+        from opencite.cli import main
+
+        orig = sys.argv
+        sys.argv = ["opencite", "batch-fetch", "/nonexistent/dois.txt"]
+        try:
+            result = main()
+            assert result == 1
+            captured = capsys.readouterr()
+            assert "Error" in captured.err
+        finally:
+            sys.argv = orig
+
+    def test_batch_fetch_empty_file(self, capsys, tmp_path):
+        """batch-fetch with empty file returns 'no identifiers'."""
+        import sys
+
+        from opencite.cli import main
+
+        empty_file = tmp_path / "empty.txt"
+        empty_file.write_text("")
+
+        orig = sys.argv
+        sys.argv = ["opencite", "batch-fetch", str(empty_file)]
+        try:
+            result = main()
+            assert result == 1
+            captured = capsys.readouterr()
+            assert "No identifiers" in captured.err
+        finally:
+            sys.argv = orig
+
+    def test_batch_fetch_invalid_json(self, capsys, tmp_path):
+        """batch-fetch with invalid JSON returns error."""
+        import sys
+
+        from opencite.cli import main
+
+        bad_json = tmp_path / "bad.json"
+        bad_json.write_text("{{{invalid")
+
+        orig = sys.argv
+        sys.argv = ["opencite", "batch-fetch", "--from-json", str(bad_json)]
+        try:
+            result = main()
+            assert result == 1
+            captured = capsys.readouterr()
+            assert "Error" in captured.err
+        finally:
+            sys.argv = orig

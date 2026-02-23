@@ -6,6 +6,8 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from opencite.clients.arxiv import ArXivClient
+from opencite.clients.biorxiv import BioRxivClient
 from opencite.clients.openalex import OpenAlexClient
 from opencite.clients.pubmed import PubMedClient
 from opencite.clients.semantic_scholar import SemanticScholarClient
@@ -17,7 +19,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ALL_SOURCES = ("openalex", "s2", "pubmed")
+ALL_SOURCES = ("openalex", "s2", "pubmed", "arxiv", "biorxiv")
 
 
 class SearchOrchestrator:
@@ -36,17 +38,23 @@ class SearchOrchestrator:
         self._openalex = OpenAlexClient(config)
         self._s2 = SemanticScholarClient(config)
         self._pubmed = PubMedClient(config)
+        self._arxiv = ArXivClient(config)
+        self._biorxiv = BioRxivClient(config)
 
     async def __aenter__(self) -> SearchOrchestrator:
         await self._openalex.__aenter__()
         await self._s2.__aenter__()
         await self._pubmed.__aenter__()
+        await self._arxiv.__aenter__()
+        await self._biorxiv.__aenter__()
         return self
 
     async def __aexit__(self, *args: object) -> None:
         await self._openalex.__aexit__()
         await self._s2.__aexit__()
         await self._pubmed.__aexit__()
+        await self._arxiv.__aexit__()
+        await self._biorxiv.__aexit__()
 
     async def search(
         self,
@@ -78,6 +86,14 @@ class SearchOrchestrator:
         if "pubmed" in sources:
             tasks["pubmed"] = asyncio.create_task(
                 self._search_pubmed(query, max_results)
+            )
+        if "arxiv" in sources:
+            tasks["arxiv"] = asyncio.create_task(
+                self._search_arxiv(query, max_results, year_from, year_to)
+            )
+        if "biorxiv" in sources:
+            tasks["biorxiv"] = asyncio.create_task(
+                self._search_biorxiv(query, max_results)
             )
 
         all_papers: list[Paper] = []
@@ -167,6 +183,23 @@ class SearchOrchestrator:
     async def _search_pubmed(self, query: str, max_results: int) -> list[Paper]:
         return await self._pubmed.search(query, max_results=max_results)
 
+    async def _search_arxiv(
+        self,
+        query: str,
+        max_results: int,
+        year_from: int | None,
+        year_to: int | None,
+    ) -> list[Paper]:
+        return await self._arxiv.search(
+            query,
+            max_results=max_results,
+            year_from=year_from,
+            year_to=year_to,
+        )
+
+    async def _search_biorxiv(self, query: str, max_results: int) -> list[Paper]:
+        return await self._biorxiv.search(query, max_results=max_results)
+
     async def _lookup_by_type(self, id_type: IDType, id_value: str) -> Paper | None:
         """Look up paper using the most appropriate API for the ID type."""
         if id_type == IDType.DOI:
@@ -189,7 +222,11 @@ class SearchOrchestrator:
             return paper
 
         if id_type == IDType.ARXIV:
-            return await self._s2.lookup(f"ARXIV:{id_value}")
+            # Try arXiv directly first (authoritative), then S2 as fallback
+            paper = await self._arxiv.lookup_arxiv_id(id_value)
+            if not paper:
+                paper = await self._s2.lookup(f"ARXIV:{id_value}")
+            return paper
 
         if id_type == IDType.S2:
             return await self._s2.lookup(id_value)
@@ -214,6 +251,13 @@ class SearchOrchestrator:
                 tasks.append(asyncio.create_task(self._s2.lookup(f"DOI:{paper.doi}")))
             if "pubmed" not in paper.data_sources:
                 tasks.append(asyncio.create_task(self._pubmed.lookup_doi(paper.doi)))
+            # For bioRxiv/medRxiv preprints, enrich from their content API
+            if (
+                paper.doi.startswith("10.1101/")
+                and "biorxiv" not in paper.data_sources
+                and "medrxiv" not in paper.data_sources
+            ):
+                tasks.append(asyncio.create_task(self._biorxiv.lookup_doi(paper.doi)))
         elif paper.pmid:
             if "openalex" not in paper.data_sources:
                 tasks.append(

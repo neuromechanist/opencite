@@ -112,6 +112,56 @@ class TestPublisherUrls:
         assert not any("api.wiley.com" in u for u in urls)
 
 
+class TestArXivBioRxivURLs:
+    """Tests for direct preprint download URL injection."""
+
+    def _make_retriever(self, **config_kwargs):
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever.config = Config(**config_kwargs)
+        return retriever
+
+    def test_arxiv_pdf_url_added_from_arxiv_id(self):
+        paper = Paper(title="Test", ids=IDSet(arxiv_id="1706.03762"))
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(paper, "1706.03762")
+        assert "https://arxiv.org/pdf/1706.03762" in urls
+
+    def test_arxiv_pdf_url_not_duplicated(self):
+        paper = Paper(
+            title="Test",
+            ids=IDSet(arxiv_id="1706.03762"),
+            pdf_locations=[
+                PDFLocation(url="https://arxiv.org/pdf/1706.03762", source="arxiv"),
+            ],
+        )
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(paper, "1706.03762")
+        assert urls.count("https://arxiv.org/pdf/1706.03762") == 1
+
+    def test_biorxiv_pdf_url_added_for_10_1101_doi(self):
+        paper = Paper(title="Test", ids=IDSet(doi="10.1101/837021"))
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(paper, "10.1101/837021")
+        biorxiv_urls = [u for u in urls if "biorxiv.org" in u]
+        assert len(biorxiv_urls) == 1
+        assert "10.1101/837021" in biorxiv_urls[0]
+
+    def test_biorxiv_pdf_url_before_doi_negotiation(self):
+        """Direct bioRxiv URL should appear before generic DOI URL."""
+        paper = Paper(title="Test", ids=IDSet(doi="10.1101/837021"))
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(paper, "10.1101/837021")
+        biorxiv_idx = next(i for i, u in enumerate(urls) if "biorxiv.org" in u)
+        doi_idx = next(i for i, u in enumerate(urls) if "doi.org" in u)
+        assert biorxiv_idx < doi_idx
+
+    def test_non_biorxiv_doi_has_no_biorxiv_url(self):
+        paper = Paper(title="Test", ids=IDSet(doi="10.1038/nature12345"))
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(paper, "10.1038/nature12345")
+        assert not any("biorxiv.org" in u for u in urls)
+
+
 class TestPublisherMap:
     def test_elsevier_prefix(self):
         assert "10.1016" in _PUBLISHER_MAP

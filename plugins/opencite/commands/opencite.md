@@ -48,46 +48,39 @@ Based on user needs, use the appropriate search strategy:
 
 Review the results and identify which papers to retrieve. Consider citation count, relevance, recency, and open access availability.
 
-### 3. Set up folder structure
+### 3. Download and convert
 
-Create a `papers/` directory in the working directory with this layout:
+**For multiple papers (preferred):** save search results as JSON and use batch-fetch:
+
+```bash
+uvx opencite search "topic" --max 10 -f json -o results.json
+uvx opencite batch-fetch --from-json results.json --convert -o ./papers --summary report.json
+```
+
+`batch-fetch --convert` automatically creates this directory structure:
 
 ```
 papers/
 ├── pdf/          # downloaded PDFs
 └── markdown/     # converted markdown files
-    └── img/      # images extracted during conversion
+    └── img/      # per-paper image directories (mistral only)
 ```
 
-```bash
-mkdir -p papers/pdf papers/markdown/img
-```
-
-### 4. Download and convert
-
-For multiple papers (preferred), save search results as JSON and use batch-fetch:
-
-```bash
-uvx opencite search "topic" --max 10 -f json -o results.json
-uvx opencite batch-fetch --from-json results.json --convert -o ./papers
-```
-
-Batch-fetch with `--convert` automatically creates the `pdf/`, `markdown/`, and `markdown/img/` subdirectories.
-
-For individual papers:
+**For individual papers:**
 
 ```bash
 uvx opencite pdf "10.1234/example" -o papers/pdf/ --convert
-# Then move/convert markdown as needed
 ```
 
-### 5. Read and synthesize
+Note: `pdf --convert` places the markdown file next to the PDF and does not extract images. For the organized subdirectory layout with image extraction, use `batch-fetch`.
 
-Read the generated markdown files from `papers/markdown/` for analysis and synthesis. Images extracted during conversion are in `papers/markdown/img/`.
+### 4. Read and synthesize
+
+Read the generated markdown files for analysis and synthesis. When using `batch-fetch`, markdown is in `papers/markdown/` and extracted images (if using markit-mistral) are in per-paper subdirectories under `papers/markdown/img/`.
 
 ### PDF Conversion
 
-Conversion uses markit-mistral when `MISTRAL_API_KEY` is set (better for math, tables, and complex layouts). Otherwise, it falls back to markitdown (free, local). Both are included by default.
+Conversion uses markit-mistral when `MISTRAL_API_KEY` is set (better for math, tables, and complex layouts with image extraction support). Otherwise, it falls back to markitdown (free, local). Both are included by default.
 
 ## Common Patterns
 
@@ -120,7 +113,7 @@ uvx opencite convert paper.pdf -o paper.md --converter auto
 ### Batch download with conversion
 ```bash
 uvx opencite search "tDCS" -f json -o results.json
-uvx opencite batch-fetch --from-json results.json --convert -o ./papers
+uvx opencite batch-fetch --from-json results.json --convert -o ./papers --summary report.json
 ```
 
 ### Convert IDs

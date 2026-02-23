@@ -74,22 +74,7 @@ Choose the search strategy based on user needs:
 
 Review results considering citation count, relevance, recency, and open access availability. Present a summary to the user and confirm which papers to retrieve.
 
-### 3. Set up folder structure
-
-Create a `papers/` directory in the working directory:
-
-```
-papers/
-├── pdf/          # downloaded PDFs
-└── markdown/     # converted markdown files
-    └── img/      # images extracted during conversion
-```
-
-```bash
-mkdir -p papers/pdf papers/markdown/img
-```
-
-### 4. Download and convert
+### 3. Download and convert
 
 **For multiple papers (preferred):** Save search results as JSON and use batch-fetch:
 
@@ -98,23 +83,30 @@ uvx opencite search "topic" --max 10 -f json -o results.json
 uvx opencite batch-fetch --from-json results.json --convert -o ./papers --summary report.json
 ```
 
-When `batch-fetch` is used with `--convert`, it automatically organizes output into `pdf/`, `markdown/`, and `markdown/img/` subdirectories within the output directory.
+`batch-fetch --convert` automatically creates this directory structure:
+
+```
+papers/
+├── pdf/          # downloaded PDFs
+└── markdown/     # converted markdown files
+    └── img/      # per-paper image directories (mistral only)
+```
 
 **For individual papers:**
 
 ```bash
-uvx opencite pdf "10.1234/example" -o papers/pdf/ --convert --converter auto
+uvx opencite pdf "10.1234/example" -o papers/pdf/ --convert
 ```
 
-For single-paper downloads, you may need to move the generated markdown to `papers/markdown/` manually.
+Note: `pdf --convert` places the markdown file next to the PDF and does not extract images. For the organized subdirectory layout with image extraction, use `batch-fetch`.
 
-### 5. Read and synthesize
+### 4. Read and synthesize
 
-Read the converted markdown files from `papers/markdown/` for deeper analysis:
+Read the converted markdown files for deeper analysis:
 
 - Summarize key findings across papers
 - Identify common themes and disagreements
-- Extract relevant figures (available in `papers/markdown/img/`)
+- When using `batch-fetch`, markdown is in `papers/markdown/` and extracted images (markit-mistral only) are in per-paper subdirectories under `papers/markdown/img/`
 - Generate BibTeX for citation: `uvx opencite lookup "DOI" -f bibtex --append-bib refs.bib`
 
 ## Commands
@@ -235,7 +227,7 @@ Downloads PDFs for multiple papers with controlled concurrency. When `--convert`
 output-dir/
 ├── pdf/          # downloaded PDFs
 └── markdown/     # converted markdown files
-    └── img/      # extracted images
+    └── img/      # per-paper image directories (mistral only)
 ```
 
 Input sources (mutually exclusive):
@@ -292,7 +284,7 @@ uvx opencite batch-fetch --from-json results.json --convert -o ./papers --summar
 # 3. Papers are now organized in:
 #    papers/pdf/       - PDF files
 #    papers/markdown/  - Markdown files ready for reading
-#    papers/markdown/img/ - Extracted figures and images
+#    papers/markdown/img/<paper>/ - Extracted figures (mistral only)
 ```
 
 ### Cross-reference identifier conversion

@@ -96,7 +96,7 @@ opencite batch-fetch --from-json FILE [options]
 opencite batch-fetch --from-stdin [options]
 ```
 
-Downloads PDFs for multiple papers with controlled concurrency. Supports text files (one ID per line), JSON files (array of DOIs or opencite search results), and stdin.
+Downloads PDFs for multiple papers with controlled concurrency. Supports text files (one ID per line), JSON files (array of DOIs or opencite search results), and stdin. With `--convert`, output is organized into `pdf/`, `markdown/`, and `markdown/img/` subdirectories.
 
 Example workflow:
 

@@ -22,7 +22,7 @@ If not installed, run `uv pip install opencite` or `pip install opencite`. PDF c
 
 Based on the user's request, determine which subcommand to use:
 
-- **search** - Find papers matching a query across Semantic Scholar, OpenAlex, and PubMed
+- **search** - Find papers matching a query across Semantic Scholar, OpenAlex, PubMed, arXiv, and bioRxiv/medRxiv
 - **lookup** - Look up a specific paper by DOI, PMID, PMCID, or other identifier
 - **cite** - Get citing/cited-by papers for a given identifier (citation graph)
 - **canonical** - Find the most-cited papers in a field or topic

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenCite is a Python CLI tool and library for academic literature search and citation management. It aggregates results from three academic APIs (Semantic Scholar, OpenAlex, PubMed), deduplicates them, and outputs results as formatted text, JSON, BibTeX, or CSV. It also supports PDF retrieval, batch downloads, and PDF-to-markdown conversion.
+OpenCite is a Python CLI tool and library for academic literature search and citation management. It aggregates results from five academic sources (Semantic Scholar, OpenAlex, PubMed, arXiv, bioRxiv/medRxiv), deduplicates them, and outputs results as formatted text, JSON, BibTeX, or CSV. It also supports PDF retrieval, batch downloads, and PDF-to-markdown conversion.
 
 ## Build and Run
 
@@ -40,7 +40,7 @@ uv run ruff format src/ tests/   # format
 - `exceptions.py` -- `OpenCiteError` hierarchy: `APIError`, `RateLimitError`, `APIKeyError`, etc.
 - `cli.py` -- argparse with subcommands: search, lookup, cite, canonical, pdf, convert, ids, batch-fetch, config
 - `utils.py` -- title normalization, fuzzy matching, author name parsing, abstract reconstruction
-- `clients/` -- per-API async clients with rate limiting (base.py, openalex.py, semantic_scholar.py, pubmed.py, id_converter.py)
+- `clients/` -- per-API async clients with rate limiting (base.py, openalex.py, semantic_scholar.py, pubmed.py, arxiv.py, biorxiv.py, id_converter.py)
 - `search.py` -- `SearchOrchestrator` for parallel multi-source search with dedup/merge
 - `citations.py` -- `CitationExplorer` for citation graph traversal and canonical paper discovery
 - `dedup.py` -- DOI + fuzzy title deduplication with paper merging
@@ -54,8 +54,8 @@ uv run ruff format src/ tests/   # format
 - **IDSet** is frozen (immutable) and centralizes all identifier types (DOI, PMID, PMCID, OpenAlex, S2, ArXiv) for cross-API lookup
 - **Paper.data_sources** tracks which APIs contributed data (provenance)
 - **BaseClient** ABC provides rate limiting (token bucket), retry with backoff, httpx session management
-- Rate limits: OpenAlex 100 req/sec, PubMed 10 req/sec, Semantic Scholar 1 req/sec
-- PDF retrieval tries sources in priority: publisher APIs (if tokens configured) -> OpenAlex/S2 PDF locations -> PMC OA -> DOI content negotiation
+- Rate limits: OpenAlex 100 req/sec, PubMed 10 req/sec, Semantic Scholar 1 req/sec, arXiv 3 req/sec, bioRxiv 10 req/sec
+- PDF retrieval tries sources in priority: publisher APIs (if tokens configured) -> OpenAlex/S2 PDF locations -> PMC OA -> direct arXiv/bioRxiv URL -> DOI content negotiation
 - PDF-to-markdown `auto` mode: if `MISTRAL_API_KEY` is set, use markit-mistral (better for math/complex layouts); otherwise fall back to markitdown (free)
 - Config loading priority: TOML < `.env` files < environment variables
 - Batch downloads use a shared `PDFRetriever` with async semaphore for concurrency control
@@ -64,6 +64,8 @@ uv run ruff format src/ tests/   # format
 - **OpenAlex** -- `pyalex` library; broadest coverage (250M+ works); best for PDF URLs, filtering, citation counts
 - **Semantic Scholar** -- `httpx` REST; TLDR summaries, SPECTER embeddings, batch 500 IDs, `citationStyles` for BibTeX
 - **PubMed/PMC** -- NCBI eutils XML; MeSH terms, PMC full text, ID Converter API
+- **arXiv** -- Atom v1 API; search + direct lookup by arXiv ID; no key required; direct PDF at `arxiv.org/pdf/{id}`
+- **bioRxiv/medRxiv** -- CrossRef (`prefix:10.1101`) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required
 
 ## Configuration
 

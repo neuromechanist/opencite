@@ -1,12 +1,12 @@
 ---
 name: OpenCite CLI
 description: This skill should be used when the user asks to "search for papers", "find citations", "look up a DOI", "get BibTeX", "download PDF", "convert PDF to markdown", "find canonical papers", "convert identifiers", "batch download papers", "configure opencite", or mentions opencite, academic literature search, citation management, or paper retrieval.
-version: 0.2.3
+version: 0.3.0
 ---
 
 # OpenCite CLI Reference
 
-OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, and PubMed, deduplicates them, and outputs formatted results. It also supports PDF retrieval, PDF-to-markdown conversion (included by default), and batch operations.
+OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, PubMed, arXiv, and bioRxiv/medRxiv, deduplicates them, and outputs formatted results. It also supports PDF retrieval, PDF-to-markdown conversion (included by default), and batch operations.
 
 ## Installation
 
@@ -119,7 +119,7 @@ uvx opencite search "query string" [options]
 
 Options:
 - `--max N` - Max results (default: 20)
-- `--source all|openalex|s2|pubmed` - Which API to query (default: all)
+- `--source all|openalex|s2|pubmed|arxiv|biorxiv` - Which API to query (default: all)
 - `--year-from YYYY` - Published after year
 - `--year-to YYYY` - Published before year
 - `--oa-only` - Open access only
@@ -180,7 +180,7 @@ Options:
 uvx opencite pdf IDENTIFIER [options]
 ```
 
-Tries multiple sources in priority order: publisher APIs (if tokens configured), OpenAlex/S2 PDF locations, PMC Open Access, DOI content negotiation.
+Tries multiple sources in priority order: publisher APIs (if tokens configured), OpenAlex/S2 PDF locations, PMC Open Access, direct arXiv/bioRxiv URL, DOI content negotiation.
 
 Options:
 - `-o, --output PATH` - Output file path (.pdf) or directory (default: .)

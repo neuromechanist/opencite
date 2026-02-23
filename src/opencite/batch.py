@@ -122,7 +122,18 @@ async def batch_download(
     result = BatchResult(total=len(ids))
     semaphore = asyncio.Semaphore(concurrency)
     out = Path(output_dir)
-    out.mkdir(parents=True, exist_ok=True)
+
+    # When converting, use pdf/ and markdown/ subdirectories
+    if convert:
+        pdf_dir = out / "pdf"
+        md_dir = out / "markdown"
+        img_dir = md_dir / "img"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        md_dir.mkdir(parents=True, exist_ok=True)
+        img_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        pdf_dir = out
+        pdf_dir.mkdir(parents=True, exist_ok=True)
 
     async def _process_one(
         identifier: str, retriever: PDFRetriever
@@ -131,7 +142,7 @@ async def batch_download(
             try:
                 path = await retriever.download(
                     identifier=identifier,
-                    output_dir=output_dir,
+                    output_dir=str(pdf_dir),
                 )
 
                 if path is None:
@@ -146,11 +157,13 @@ async def batch_download(
                     try:
                         from opencite.convert import convert_pdf
 
-                        md_out = path.with_suffix(".md")
+                        md_out = md_dir / path.with_suffix(".md").name
                         convert_pdf(
                             str(path),
                             output_path=str(md_out),
                             converter=converter,
+                            extract_images=True,
+                            images_dir=str(img_dir),
                             mistral_api_key=config.mistral_api_key,
                         )
                         result.converted += 1

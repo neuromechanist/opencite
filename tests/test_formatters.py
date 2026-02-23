@@ -218,6 +218,18 @@ class TestTextFormatter:
         assert "Bare Paper" in output
         assert "Unknown" in output  # authors_short
 
+    def test_includes_pmcid(self):
+        paper = Paper(title="Test", ids=IDSet(pmcid="PMC12345"), year=2024)
+        f = get_formatter("text")
+        output = f.format_single(paper)
+        assert "PMCID: PMC12345" in output
+
+    def test_includes_openalex_id(self):
+        paper = Paper(title="Test", ids=IDSet(openalex_id="W123456"), year=2024)
+        f = get_formatter("text")
+        output = f.format_single(paper)
+        assert "OpenAlex: W123456" in output
+
 
 class TestJsonFormatter:
     def test_format_papers(self):

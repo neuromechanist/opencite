@@ -1,4 +1,4 @@
-"""Tests for opencite.clients.base (RateLimiter, no API)."""
+"""Tests for opencite.clients.base (RateLimiter and BaseClient)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import time
 
 import pytest
 
-from opencite.clients.base import RateLimiter
+from opencite.clients.base import BaseClient, RateLimiter
+from opencite.config import Config
 
 
 class TestRateLimiter:
@@ -66,3 +67,72 @@ class TestRateLimiter:
         assert rl.rate == 10.0
         assert rl.burst == 5
         assert rl._tokens == 5.0
+
+
+class _ConcreteClient(BaseClient):
+    """Minimal concrete subclass for testing BaseClient."""
+
+    def _default_headers(self) -> dict[str, str]:
+        return {"X-Test": "true"}
+
+
+class TestBaseClient:
+    def test_init_default_values(self):
+        config = Config()
+        client = _ConcreteClient(
+            config=config,
+            base_url="https://api.example.com",
+            rate_limit=10.0,
+            burst=5,
+        )
+        assert client.base_url == "https://api.example.com"
+        assert client.timeout == config.timeout
+        assert client.max_retries == config.max_retries
+        assert client._client is None
+
+    def test_init_custom_timeout_and_retries(self):
+        config = Config()
+        client = _ConcreteClient(
+            config=config,
+            base_url="https://api.example.com",
+            rate_limit=10.0,
+            timeout=30.0,
+            max_retries=5,
+        )
+        assert client.timeout == 30.0
+        assert client.max_retries == 5
+
+    @pytest.mark.asyncio
+    async def test_context_manager(self):
+        config = Config()
+        client = _ConcreteClient(
+            config=config,
+            base_url="https://api.example.com",
+            rate_limit=10.0,
+        )
+        assert client._client is None
+        async with client:
+            assert client._client is not None
+        assert client._client is None
+
+    @pytest.mark.asyncio
+    async def test_request_without_context_raises(self):
+        config = Config()
+        client = _ConcreteClient(
+            config=config,
+            base_url="https://api.example.com",
+            rate_limit=10.0,
+        )
+        with pytest.raises(RuntimeError, match="Client not initialized"):
+            await client.get("/test")
+
+    def test_rate_limiter_configured(self):
+        config = Config()
+        client = _ConcreteClient(
+            config=config,
+            base_url="https://api.example.com",
+            rate_limit=50.0,
+            burst=10,
+        )
+        assert client.rate_limiter.rate == 50.0
+        assert client.rate_limiter.burst == 10

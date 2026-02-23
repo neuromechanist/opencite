@@ -12,6 +12,7 @@ from opencite.batch import (
     prepare_output_dirs,
     read_ids_from_file,
     read_ids_from_json,
+    read_ids_from_stdin,
 )
 
 
@@ -111,6 +112,79 @@ class TestReadIdsFromJson:
             f.flush()
             with pytest.raises(ValueError, match="Invalid JSON"):
                 read_ids_from_json(f.name)
+
+    def test_array_of_objects_with_DOI_key(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump([{"DOI": "10.1234/a"}], f)
+            f.flush()
+            ids = read_ids_from_json(f.name)
+        assert ids == ["10.1234/a"]
+
+    def test_array_of_objects_with_id_key(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump([{"id": "10.1234/a"}], f)
+            f.flush()
+            ids = read_ids_from_json(f.name)
+        assert ids == ["10.1234/a"]
+
+    def test_mixed_strings_and_objects(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(["10.1234/a", {"doi": "10.1234/b"}], f)
+            f.flush()
+            ids = read_ids_from_json(f.name)
+        assert ids == ["10.1234/a", "10.1234/b"]
+
+    def test_empty_array(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump([], f)
+            f.flush()
+            ids = read_ids_from_json(f.name)
+        assert ids == []
+
+    def test_papers_format_with_id_key(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            data = {"papers": [{"id": "10.1234/a"}, {"doi": "10.1234/b"}]}
+            json.dump(data, f)
+            f.flush()
+            ids = read_ids_from_json(f.name)
+        assert ids == ["10.1234/a", "10.1234/b"]
+
+    def test_objects_without_doi_skipped(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump([{"title": "No DOI"}, {"doi": "10.1234/b"}], f)
+            f.flush()
+            ids = read_ids_from_json(f.name)
+        assert ids == ["10.1234/b"]
+
+
+class TestReadIdsFromStdin:
+    def test_basic(self, monkeypatch):
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("10.1234/a\n10.5678/b\n"))
+        ids = read_ids_from_stdin()
+        assert ids == ["10.1234/a", "10.5678/b"]
+
+    def test_skips_comments_and_blanks(self, monkeypatch):
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("# comment\n\n10.1234/a\n"))
+        ids = read_ids_from_stdin()
+        assert ids == ["10.1234/a"]
+
+    def test_strips_whitespace(self, monkeypatch):
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("  10.1234/a  \n"))
+        ids = read_ids_from_stdin()
+        assert ids == ["10.1234/a"]
+
+    def test_empty_stdin(self, monkeypatch):
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO(""))
+        ids = read_ids_from_stdin()
+        assert ids == []
 
 
 class TestPrepareOutputDirs:

@@ -201,3 +201,137 @@ class TestMergePapers:
         b = _paper("Test", year=2021)
         merged = merge_papers(a, b)
         assert merged.year == 2021
+
+    def test_merge_grants(self):
+        a = Paper(
+            title="Test",
+            ids=IDSet(),
+            grants=[{"funder": "NIH", "award_id": "R01"}],
+            data_sources={"a"},
+        )
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            grants=[
+                {"funder": "NIH", "award_id": "R01"},
+                {"funder": "NSF", "award_id": "1234"},
+            ],
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert len(merged.grants) == 2
+
+    def test_merge_grants_empty(self):
+        a = _paper("Test")
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            grants=[{"funder": "NIH", "award_id": "R01"}],
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert len(merged.grants) == 1
+
+    def test_merge_mesh_terms(self):
+        a = Paper(
+            title="Test",
+            ids=IDSet(),
+            mesh_terms=["Brain", "Imaging"],
+            data_sources={"a"},
+        )
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            mesh_terms=["Brain", "Neurons"],
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert len(merged.mesh_terms) == 3
+
+    def test_merge_keywords(self):
+        a = Paper(
+            title="Test",
+            ids=IDSet(),
+            keywords=["fMRI", "encoding"],
+            data_sources={"a"},
+        )
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            keywords=["fmri", "decoding"],
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        # "fMRI" and "fmri" should deduplicate (case-insensitive)
+        assert len(merged.keywords) == 3
+
+    def test_merge_publication_date(self):
+        a = _paper("Test")
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            publication_date="2024-01-15",
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert merged.publication_date == "2024-01-15"
+
+    def test_merge_pub_type(self):
+        a = _paper("Test")
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            pub_type="journal-article",
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert merged.pub_type == "journal-article"
+
+    def test_merge_url(self):
+        a = _paper("Test")
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            url="https://example.com/paper",
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert merged.url == "https://example.com/paper"
+
+    def test_merge_bibtex(self):
+        a = Paper(
+            title="Test",
+            ids=IDSet(),
+            _bibtex="@article{a, title={Test}}",
+            data_sources={"a"},
+        )
+        b = _paper("Test")
+        merged = merge_papers(a, b)
+        assert merged._bibtex == "@article{a, title={Test}}"
+
+    def test_merge_is_retracted(self):
+        a = _paper("Test")
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            is_retracted=True,
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert merged.is_retracted is True
+
+    def test_merge_influential_citation_count(self):
+        a = Paper(
+            title="Test",
+            ids=IDSet(),
+            influential_citation_count=10,
+            data_sources={"a"},
+        )
+        b = Paper(
+            title="Test",
+            ids=IDSet(),
+            influential_citation_count=25,
+            data_sources={"b"},
+        )
+        merged = merge_papers(a, b)
+        assert merged.influential_citation_count == 25

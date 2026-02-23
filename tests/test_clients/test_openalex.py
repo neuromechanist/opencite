@@ -225,6 +225,78 @@ class TestParseWork:
         paper = client._parse_work(work)
         assert len(paper.abstract) <= 1000
 
+    def test_funder_without_award_ids(self):
+        client = _make_client()
+        work = {
+            "title": "Test",
+            "funders": [{"display_name": "NIH"}],
+        }
+        paper = client._parse_work(work)
+        assert len(paper.grants) == 1
+        assert paper.grants[0]["funder"] == "NIH"
+        assert "award_id" not in paper.grants[0]
+
+    def test_funder_empty_name_skipped(self):
+        client = _make_client()
+        work = {
+            "title": "Test",
+            "funders": [{"display_name": ""}],
+        }
+        paper = client._parse_work(work)
+        assert len(paper.grants) == 0
+
+    def test_topics_limited_to_5(self):
+        client = _make_client()
+        work = {
+            "title": "Test",
+            "topics": [{"display_name": f"Topic {i}"} for i in range(10)],
+        }
+        paper = client._parse_work(work)
+        assert len(paper.topics) == 5
+
+    def test_empty_topic_skipped(self):
+        client = _make_client()
+        work = {
+            "title": "Test",
+            "topics": [{"display_name": ""}, {"display_name": "Valid"}],
+        }
+        paper = client._parse_work(work)
+        assert paper.topics == ["Valid"]
+
+    def test_empty_mesh_name_skipped(self):
+        client = _make_client()
+        work = {
+            "title": "Test",
+            "mesh": [{"descriptor_name": ""}, {"descriptor_name": "Brain"}],
+        }
+        paper = client._parse_work(work)
+        assert paper.mesh_terms == ["Brain"]
+
+    def test_single_name_author(self):
+        """Author with single-word name."""
+        client = _make_client()
+        work = {
+            "title": "Test",
+            "authorships": [
+                {"author": {"display_name": "Madonna"}},
+            ],
+        }
+        paper = client._parse_work(work)
+        assert paper.authors[0].family_name == "Madonna"
+        assert paper.authors[0].given_name == ""
+
+    def test_authorships_limited_to_50(self):
+        """Verify authorships are capped at 50."""
+        client = _make_client()
+        work = {
+            "title": "Test",
+            "authorships": [
+                {"author": {"display_name": f"Author {i}"}} for i in range(60)
+            ],
+        }
+        paper = client._parse_work(work)
+        assert len(paper.authors) == 50
+
 
 class TestExtractPdfLocations:
     def test_deduplicates_urls(self):

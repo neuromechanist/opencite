@@ -133,6 +133,39 @@ class TestParsePubmedXml:
         papers = _parse_pubmed_xml(xml)
         assert papers == []
 
+    def test_parse_article_without_pmid(self):
+        xml = """\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <Article><ArticleTitle>No PMID Paper</ArticleTitle></Article>
+    </MedlineCitation>
+</PubmedArticle>
+</PubmedArticleSet>"""
+        papers = _parse_pubmed_xml(xml)
+        assert papers == []
+
+    def test_abstract_truncated_at_1000(self):
+        long_text = "A" * 1200
+        xml = f"""\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <PMID>11111111</PMID>
+        <Article>
+            <ArticleTitle>Long Abstract Paper</ArticleTitle>
+            <Abstract><AbstractText>{long_text}</AbstractText></Abstract>
+        </Article>
+    </MedlineCitation>
+    <PubmedData><ArticleIdList/></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>"""
+        papers = _parse_pubmed_xml(xml)
+        assert len(papers) == 1
+        assert len(papers[0].abstract) == 1000
+
 
 class TestMonthToNum:
     def test_numeric(self):

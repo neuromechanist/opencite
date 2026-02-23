@@ -324,6 +324,19 @@ class TestCmdConfig:
         captured = capsys.readouterr()
         assert "Usage" in captured.out
 
+    def test_config_init(self, capsys, tmp_path, monkeypatch):
+        from opencite.cli import _cmd_config, create_parser
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+
+        parser = create_parser()
+        args = parser.parse_args(["config", "init"])
+        result = _cmd_config(args)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Created config file" in captured.out
+
 
 class TestWriteOutput:
     def test_write_to_file(self, tmp_path, capsys):
@@ -370,5 +383,55 @@ class TestMainErrorHandling:
             assert result == 0
             captured = capsys.readouterr()
             assert "Resolved" in captured.out
+        finally:
+            sys.argv = orig
+
+    def test_config_path_via_main(self, capsys):
+        """main() dispatches config path correctly."""
+        import sys
+
+        from opencite.cli import main
+
+        orig = sys.argv
+        sys.argv = ["opencite", "config", "path"]
+        try:
+            result = main()
+            assert result == 0
+            captured = capsys.readouterr()
+            assert "config.toml" in captured.out
+        finally:
+            sys.argv = orig
+
+    def test_debug_flag_is_accepted(self):
+        """main() accepts --debug flag without crashing."""
+        import sys
+
+        from opencite.cli import main
+
+        orig = sys.argv
+        sys.argv = ["opencite", "--debug", "config", "show"]
+        try:
+            result = main()
+            assert result == 0
+        finally:
+            sys.argv = orig
+
+    def test_config_init_via_main(self, capsys, tmp_path, monkeypatch):
+        """main() dispatches config init correctly."""
+        import sys
+
+        from opencite.cli import main
+
+        # Point config to temp dir to avoid modifying real config
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+
+        orig = sys.argv
+        sys.argv = ["opencite", "config", "init"]
+        try:
+            result = main()
+            assert result == 0
+            captured = capsys.readouterr()
+            assert "Created config file" in captured.out
         finally:
             sys.argv = orig

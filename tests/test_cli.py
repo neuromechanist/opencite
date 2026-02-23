@@ -237,3 +237,138 @@ class TestCLIArgParsing:
         args = parser.parse_args(["config", "init"])
         assert args.command == "config"
         assert args.config_action == "init"
+
+    def test_config_show(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["config", "show"])
+        assert args.config_action == "show"
+
+    def test_config_path(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["config", "path"])
+        assert args.config_action == "path"
+
+    def test_debug_and_quiet_flags(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["--debug", "--quiet", "search", "test"])
+        assert args.debug is True
+        assert args.quiet is True
+
+    def test_batch_fetch_summary_flag(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(
+            ["batch-fetch", "dois.txt", "--summary", "report.json"]
+        )
+        assert args.summary == "report.json"
+
+    def test_convert_extract_images(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(
+            [
+                "convert",
+                "paper.pdf",
+                "--extract-images",
+                "--images-dir",
+                "/tmp/images",
+            ]
+        )
+        assert args.extract_images is True
+        assert args.images_dir == "/tmp/images"
+
+    def test_pdf_filename_option(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["pdf", "10.1234/test", "--filename", "custom.pdf"])
+        assert args.filename == "custom.pdf"
+
+
+class TestCmdConfig:
+    def test_config_show(self, capsys):
+        from opencite.cli import _cmd_config, create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["config", "show"])
+        result = _cmd_config(args)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Resolved configuration" in captured.out
+
+    def test_config_path(self, capsys):
+        from opencite.cli import _cmd_config, create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["config", "path"])
+        result = _cmd_config(args)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "config.toml" in captured.out
+
+    def test_config_no_subcommand(self, capsys):
+        from opencite.cli import _cmd_config, create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["config"])
+        result = _cmd_config(args)
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Usage" in captured.out
+
+
+class TestWriteOutput:
+    def test_write_to_file(self, tmp_path, capsys):
+        from opencite.cli import _write_output
+
+        outfile = tmp_path / "output.txt"
+        _write_output("hello world", str(outfile))
+        assert outfile.read_text() == "hello world\n"
+        captured = capsys.readouterr()
+        assert "Output written to" in captured.err
+
+    def test_write_to_stdout(self, capsys):
+        from opencite.cli import _write_output
+
+        _write_output("hello stdout", None)
+        captured = capsys.readouterr()
+        assert "hello stdout" in captured.out
+
+
+class TestMainErrorHandling:
+    def test_no_command_prints_help(self):
+        import sys
+
+        from opencite.cli import main
+
+        orig = sys.argv
+        sys.argv = ["opencite"]
+        try:
+            result = main()
+            assert result == 0
+        finally:
+            sys.argv = orig
+
+    def test_config_show_via_main(self, capsys):
+        """main() dispatches config show correctly."""
+        import sys
+
+        from opencite.cli import main
+
+        orig = sys.argv
+        sys.argv = ["opencite", "config", "show"]
+        try:
+            result = main()
+            assert result == 0
+            captured = capsys.readouterr()
+            assert "Resolved" in captured.out
+        finally:
+            sys.argv = orig

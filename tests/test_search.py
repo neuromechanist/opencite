@@ -7,12 +7,52 @@ import os
 import pytest
 
 from opencite.config import Config
-from opencite.search import SearchOrchestrator
+from opencite.models import Paper
+from opencite.search import SearchOrchestrator, _sort_papers
 
 
 @pytest.fixture
 def config() -> Config:
     return Config.from_env()
+
+
+# -- Unit tests for _sort_papers (no API needed) --
+
+
+class TestSortPapers:
+    def test_sort_by_citations(self):
+        papers = [
+            Paper(title="Low", citation_count=10),
+            Paper(title="High", citation_count=1000),
+            Paper(title="Mid", citation_count=100),
+        ]
+        sorted_papers = _sort_papers(papers, "citations")
+        assert [p.title for p in sorted_papers] == ["High", "Mid", "Low"]
+
+    def test_sort_by_year(self):
+        papers = [
+            Paper(title="Old", year=2000, citation_count=50),
+            Paper(title="New", year=2024, citation_count=10),
+            Paper(title="Mid", year=2015, citation_count=100),
+        ]
+        sorted_papers = _sort_papers(papers, "year")
+        assert [p.title for p in sorted_papers] == ["New", "Mid", "Old"]
+
+    def test_sort_relevance_preserves_order(self):
+        papers = [Paper(title="A"), Paper(title="B"), Paper(title="C")]
+        sorted_papers = _sort_papers(papers, "relevance")
+        assert [p.title for p in sorted_papers] == ["A", "B", "C"]
+
+    def test_empty_list(self):
+        assert _sort_papers([], "citations") == []
+
+    def test_none_year_handled(self):
+        papers = [
+            Paper(title="No Year"),
+            Paper(title="Has Year", year=2020),
+        ]
+        sorted_papers = _sort_papers(papers, "year")
+        assert sorted_papers[0].title == "Has Year"
 
 
 def has_all_keys() -> bool:

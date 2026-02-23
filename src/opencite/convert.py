@@ -73,7 +73,7 @@ def _convert_with_markitdown(pdf_path: Path) -> str:
     except ImportError as e:
         raise ImportError(
             "markitdown is required for PDF conversion. "
-            "Install with: uv pip install opencite[convert]"
+            "Install with: pip install opencite"
         ) from e
 
     converter = MarkItDown()
@@ -93,8 +93,8 @@ def _convert_with_mistral(
         from markit_mistral import MarkItMistral
     except ImportError as e:
         raise ImportError(
-            "markit-mistral>=0.2.0 is required for Mistral PDF conversion. "
-            "Install with: uv pip install opencite[convert]"
+            "markit-mistral>=0.2.2 is required for Mistral PDF conversion. "
+            "Install with: pip install opencite"
         ) from e
 
     kwargs: dict[str, object] = {}

@@ -46,8 +46,8 @@ uv run ruff format src/ tests/   # format
 - `dedup.py` -- DOI + fuzzy title deduplication with paper merging
 - `bibtex.py` -- BibTeX fetch (S2 citationStyles, DOI negotiation) and generation
 - `pdf.py` -- multi-source PDF retrieval pipeline with publisher-authenticated downloads
-- `convert.py` -- PDF-to-markdown (markitdown, markit-mistral) with image extraction support
-- `batch.py` -- batch PDF download and conversion with controlled concurrency
+- `convert.py` -- PDF-to-markdown (markitdown, markit-mistral; both included by default) with image extraction support
+- `batch.py` -- batch PDF download and conversion with controlled concurrency; organizes into pdf/, markdown/, markdown/img/ subdirs when converting
 - `formatters/` -- output formatters (text, json, bibtex, csv)
 
 ### Key Design Patterns
@@ -88,6 +88,5 @@ Config loading priority (later overrides earlier):
 
 ## Dependencies
 
-Core: `httpx`, `pyalex`
-Optional [convert]: `markitdown`, `markit-mistral>=0.2.0`
+Core: `httpx`, `pyalex`, `markitdown`, `markit-mistral>=0.2.2`
 Dev: `pytest`, `pytest-asyncio`, `pytest-cov`, `ruff`, `pre-commit`

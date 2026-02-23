@@ -161,7 +161,9 @@ def create_parser() -> argparse.ArgumentParser:
         "batch-fetch", help="download PDFs for multiple papers"
     )
     batch_input = batch_p.add_mutually_exclusive_group(required=True)
-    batch_input.add_argument("file", nargs="?", help="text file with IDs (one per line)")
+    batch_input.add_argument(
+        "file", nargs="?", help="text file with IDs (one per line)"
+    )
     batch_input.add_argument(
         "--from-json", metavar="FILE", help="JSON file with DOIs or search results"
     )
@@ -572,10 +574,12 @@ async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
                 json.dump(result.to_dict(), f, indent=2)
             print(f"Summary written to {summary_path}", file=sys.stderr)
         except OSError as e:
-            print(f"Warning: could not write summary to {summary_path}: {e}", file=sys.stderr)
+            print(
+                f"Warning: could not write summary to {summary_path}: {e}",
+                file=sys.stderr,
+            )
 
     return 1 if result.failed else 0
-
 
 
 def _cmd_config(args: argparse.Namespace) -> int:

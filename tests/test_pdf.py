@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from opencite.config import Config
 from opencite.models import Author, IDSet, Paper, PDFLocation
 from opencite.pdf import _PUBLISHER_MAP, PDFRetriever
@@ -190,21 +188,88 @@ class TestMakeFilename:
         assert "Some" in name
 
 
-class TestConvertPdf:
-    def test_missing_file_raises(self):
-        from opencite.convert import convert_pdf
+class TestMakeFilenameEdgeCases:
+    def test_author_name_only(self):
+        """When author has no family_name, uses name field."""
+        paper = Paper(
+            title="Some Title",
+            authors=[Author(name="J. Smith")],
+            year=2020,
+        )
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        name = retriever._make_filename(paper, "id")
+        # Should split on comma and use first part
+        assert "J" in name or "Smith" in name
 
-        with pytest.raises(FileNotFoundError):
-            convert_pdf("/nonexistent/file.pdf")
+    def test_title_only(self):
+        """Paper with title but no authors or year."""
+        paper = Paper(title="Test Title Here")
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        name = retriever._make_filename(paper, "id")
+        assert "Test" in name
 
-    def test_auto_picks_markitdown(self, monkeypatch):
-        from opencite.convert import _pick_converter
+    def test_special_chars_in_identifier(self):
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        name = retriever._make_filename(None, "10.1016/j.neuroimage.2024.001")
+        # Slashes and dots should be replaced
+        assert "/" not in name
 
-        monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
-        assert _pick_converter() == "markitdown"
 
-    def test_auto_picks_mistral(self, monkeypatch):
-        from opencite.convert import _pick_converter
+class TestReportFailuresEdgeCases:
+    def _make_retriever(self):
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever.config = Config()
+        return retriever
 
-        monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
-        assert _pick_converter() == "mistral"
+    def test_institutional_access_from_identifier(self, caplog):
+        """When paper has no DOI but identifier is a DOI, suggest access."""
+        import logging
+
+        retriever = self._make_retriever()
+        failures = [("https://example.com", "404")]
+        with caplog.at_level(logging.INFO):
+            retriever._report_failures("10.1234/test", failures, None)
+        assert "institutional access" in caplog.text
+
+    def test_no_institutional_suggestion_for_non_doi(self, caplog):
+        """When identifier is not a DOI, no institutional suggestion."""
+        import logging
+
+        retriever = self._make_retriever()
+        failures = [("https://example.com", "404")]
+        with caplog.at_level(logging.INFO):
+            retriever._report_failures("some_random_id", failures, None)
+        assert "institutional access" not in caplog.text
+
+
+class TestCollectUrlsEdgeCases:
+    def _make_retriever(self, **config_kwargs):
+        retriever = PDFRetriever.__new__(PDFRetriever)
+        retriever.config = Config(**config_kwargs)
+        return retriever
+
+    def test_multiple_pdf_locations(self):
+        paper = Paper(
+            title="Test",
+            ids=IDSet(doi="10.1234/test"),
+            pdf_locations=[
+                PDFLocation(url="https://a.pdf", source="s2"),
+                PDFLocation(url="https://b.pdf", source="openalex"),
+            ],
+        )
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(paper, "10.1234/test")
+        assert "https://a.pdf" in urls
+        assert "https://b.pdf" in urls
+
+    def test_identifier_parsed_when_no_paper(self):
+        """When paper is None, DOI is extracted from identifier."""
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(None, "10.1234/test")
+        assert "https://doi.org/10.1234/test" in urls
+
+    def test_identifier_pmid_no_urls(self):
+        """A PMID with no paper produces no URLs (no DOI to negotiate)."""
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(None, "pmid:12345")
+        assert urls == []

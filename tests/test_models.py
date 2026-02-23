@@ -38,6 +38,30 @@ class TestIDSet:
         assert id_type == IDType.PMID
         assert value == "12345"
 
+    def test_best_lookup_id_pmcid_fallback(self):
+        ids = IDSet(pmcid="PMC999")
+        id_type, value = ids.best_lookup_id()
+        assert id_type == IDType.PMCID
+        assert value == "PMC999"
+
+    def test_best_lookup_id_s2_fallback(self):
+        ids = IDSet(s2_id="abc123def456")
+        id_type, value = ids.best_lookup_id()
+        assert id_type == IDType.S2
+        assert value == "abc123def456"
+
+    def test_best_lookup_id_openalex_fallback(self):
+        ids = IDSet(openalex_id="W12345")
+        id_type, value = ids.best_lookup_id()
+        assert id_type == IDType.OPENALEX
+        assert value == "W12345"
+
+    def test_best_lookup_id_arxiv_fallback(self):
+        ids = IDSet(arxiv_id="2106.15928")
+        id_type, value = ids.best_lookup_id()
+        assert id_type == IDType.ARXIV
+        assert value == "2106.15928"
+
     def test_best_lookup_id_raises_when_empty(self):
         ids = IDSet()
         with pytest.raises(ValueError, match="No identifier"):
@@ -163,6 +187,12 @@ class TestParseIdentifier:
 
     def test_pmcid_prefix(self):
         id_type, value = parse_identifier("pmc:PMC1234567")
+        assert id_type == IDType.PMCID
+        assert value == "PMC1234567"
+
+    def test_pmcid_prefix_without_pmc_in_value(self):
+        """pmc:1234567 should auto-add PMC prefix."""
+        id_type, value = parse_identifier("pmc:1234567")
         assert id_type == IDType.PMCID
         assert value == "PMC1234567"
 

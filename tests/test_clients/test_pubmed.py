@@ -6,7 +6,9 @@ import pytest
 
 from opencite.clients.pubmed import (
     PubMedClient,
+    _extract_authors,
     _extract_link_ids,
+    _extract_pub_date,
     _month_to_num,
     _parse_pubmed_xml,
 )
@@ -131,6 +133,53 @@ class TestParsePubmedXml:
         papers = _parse_pubmed_xml(xml)
         assert papers == []
 
+    def test_parse_article_without_pmid(self):
+        xml = """\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <Article><ArticleTitle>No PMID Paper</ArticleTitle></Article>
+    </MedlineCitation>
+</PubmedArticle>
+</PubmedArticleSet>"""
+        papers = _parse_pubmed_xml(xml)
+        assert papers == []
+
+    def test_parse_article_with_empty_title(self):
+        xml = """\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <PMID>12345</PMID>
+        <Article><ArticleTitle></ArticleTitle></Article>
+    </MedlineCitation>
+</PubmedArticle>
+</PubmedArticleSet>"""
+        papers = _parse_pubmed_xml(xml)
+        assert papers == []
+
+    def test_abstract_truncated_at_1000(self):
+        long_text = "A" * 1200
+        xml = f"""\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <PMID>11111111</PMID>
+        <Article>
+            <ArticleTitle>Long Abstract Paper</ArticleTitle>
+            <Abstract><AbstractText>{long_text}</AbstractText></Abstract>
+        </Article>
+    </MedlineCitation>
+    <PubmedData><ArticleIdList/></PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>"""
+        papers = _parse_pubmed_xml(xml)
+        assert len(papers) == 1
+        assert len(papers[0].abstract) == 1000
+
 
 class TestMonthToNum:
     def test_numeric(self):
@@ -239,3 +288,277 @@ class TestPubMedClient:
         assert paper is not None
         # MeSH terms may or may not be present, but the field should be a list
         assert isinstance(paper.mesh_terms, list)
+
+
+# -- Additional XML parsing unit tests --
+
+
+FULL_ARTICLE_XML = """\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <PMID>99999999</PMID>
+        <Article>
+            <ArticleTitle>A <i>Novel</i> Approach to Brain Imaging</ArticleTitle>
+            <Abstract>
+                <AbstractText Label="BACKGROUND">Brain imaging is important.</AbstractText>
+                <AbstractText Label="METHODS">We used fMRI.</AbstractText>
+            </Abstract>
+            <AuthorList>
+                <Author>
+                    <LastName>Smith</LastName>
+                    <ForeName>John A</ForeName>
+                    <Identifier Source="ORCID">https://orcid.org/0000-0001-1111-2222</Identifier>
+                </Author>
+                <Author>
+                    <LastName>Doe</LastName>
+                    <ForeName>Jane</ForeName>
+                </Author>
+                <Author>
+                    <CollectiveName>Brain Consortium</CollectiveName>
+                </Author>
+            </AuthorList>
+            <Journal>
+                <ISSN>1234-5678</ISSN>
+                <Title>NeuroImage</Title>
+                <JournalIssue>
+                    <PubDate>
+                        <Year>2024</Year>
+                        <Month>Mar</Month>
+                        <Day>15</Day>
+                    </PubDate>
+                </JournalIssue>
+            </Journal>
+            <PublicationType>Journal Article</PublicationType>
+            <PublicationType>Research Support, N.I.H.</PublicationType>
+        </Article>
+        <MeshHeadingList>
+            <MeshHeading>
+                <DescriptorName>Brain</DescriptorName>
+            </MeshHeading>
+            <MeshHeading>
+                <DescriptorName>Magnetic Resonance Imaging</DescriptorName>
+            </MeshHeading>
+        </MeshHeadingList>
+        <KeywordList>
+            <Keyword>fMRI</Keyword>
+            <Keyword>brain encoding</Keyword>
+        </KeywordList>
+    </MedlineCitation>
+    <PubmedData>
+        <ArticleIdList>
+            <ArticleId IdType="doi">10.1016/j.neuroimage.2024.001</ArticleId>
+            <ArticleId IdType="pmc">PMC9999999</ArticleId>
+        </ArticleIdList>
+    </PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>
+"""
+
+GRANT_XML = """\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <PMID>88888888</PMID>
+        <Article>
+            <ArticleTitle>Funded Research Paper</ArticleTitle>
+            <Abstract><AbstractText>Some abstract.</AbstractText></Abstract>
+            <AuthorList>
+                <Author>
+                    <LastName>Grant</LastName>
+                    <ForeName>Bob</ForeName>
+                </Author>
+            </AuthorList>
+            <GrantList>
+                <Grant>
+                    <GrantID>R01-NS123456</GrantID>
+                    <Agency>NIH</Agency>
+                </Grant>
+                <Grant>
+                    <GrantID>ERC-2020-StG</GrantID>
+                    <Agency>European Research Council</Agency>
+                </Grant>
+            </GrantList>
+        </Article>
+    </MedlineCitation>
+    <PubmedData>
+        <ArticleIdList>
+            <ArticleId IdType="doi">10.1234/grants</ArticleId>
+        </ArticleIdList>
+    </PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>
+"""
+
+MEDLINE_DATE_XML = """\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <PMID>77777777</PMID>
+        <Article>
+            <ArticleTitle>MedlineDate Format Paper</ArticleTitle>
+            <Journal>
+                <Title>Some Journal</Title>
+                <JournalIssue>
+                    <PubDate>
+                        <MedlineDate>2023 Jan-Feb</MedlineDate>
+                    </PubDate>
+                </JournalIssue>
+            </Journal>
+            <AuthorList>
+                <Author><LastName>Test</LastName><ForeName>A</ForeName></Author>
+            </AuthorList>
+        </Article>
+    </MedlineCitation>
+    <PubmedData>
+        <ArticleIdList />
+    </PubmedData>
+</PubmedArticle>
+</PubmedArticleSet>
+"""
+
+
+class TestParseFullArticle:
+    """Test _parse_article with richer XML including mixed content, MeSH, keywords."""
+
+    def test_mixed_content_title(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        assert len(papers) == 1
+        # Mixed content <i>Novel</i> should be extracted
+        assert "Novel" in papers[0].title
+        assert "Brain Imaging" in papers[0].title
+
+    def test_labeled_abstract(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        abstract = papers[0].abstract
+        assert "BACKGROUND: Brain imaging is important." in abstract
+        assert "METHODS: We used fMRI." in abstract
+
+    def test_collective_author(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        authors = papers[0].authors
+        # 3 authors: Smith, Doe, Brain Consortium
+        assert len(authors) == 3
+        assert authors[2].name == "Brain Consortium"
+        assert authors[2].family_name == "Brain Consortium"
+
+    def test_orcid_stripped_from_url(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        assert papers[0].authors[0].orcid == "0000-0001-1111-2222"
+
+    def test_mesh_terms(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        assert "Brain" in papers[0].mesh_terms
+        assert "Magnetic Resonance Imaging" in papers[0].mesh_terms
+
+    def test_keywords_as_topics(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        assert "fMRI" in papers[0].topics
+        assert "brain encoding" in papers[0].topics
+
+    def test_pub_type_first_only(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        assert papers[0].pub_type == "Journal Article"
+
+    def test_pub_date_iso(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        assert papers[0].publication_date == "2024-03-15"
+
+    def test_year_extraction(self):
+        papers = _parse_pubmed_xml(FULL_ARTICLE_XML)
+        assert papers[0].year == 2024
+
+
+class TestParseGrants:
+    def test_grants_extracted(self):
+        papers = _parse_pubmed_xml(GRANT_XML)
+        assert len(papers) == 1
+        grants = papers[0].grants
+        assert len(grants) == 2
+        assert grants[0]["award_id"] == "R01-NS123456"
+        assert grants[0]["funder"] == "NIH"
+        assert grants[1]["award_id"] == "ERC-2020-StG"
+        assert grants[1]["funder"] == "European Research Council"
+
+
+class TestParseMedlineDate:
+    def test_medline_date_year(self):
+        papers = _parse_pubmed_xml(MEDLINE_DATE_XML)
+        assert len(papers) == 1
+        assert papers[0].year == 2023
+
+
+class TestExtractPubDate:
+    """Test _extract_pub_date with various month formats."""
+
+    @staticmethod
+    def _make_article(year, month=None, day=None):
+        import xml.etree.ElementTree as ET
+
+        xml = f"""<PubmedArticle><Article><Journal><JournalIssue>
+            <PubDate>
+                <Year>{year}</Year>"""
+        if month:
+            xml += f"<Month>{month}</Month>"
+        if day:
+            xml += f"<Day>{day}</Day>"
+        xml += "</PubDate></JournalIssue></Journal></Article></PubmedArticle>"
+        return ET.fromstring(xml)
+
+    def test_full_date(self):
+        article = self._make_article("2024", "06", "15")
+        assert _extract_pub_date(article) == "2024-06-15"
+
+    def test_year_month_only(self):
+        article = self._make_article("2024", "11")
+        assert _extract_pub_date(article) == "2024-11"
+
+    def test_year_only(self):
+        article = self._make_article("2024")
+        assert _extract_pub_date(article) == "2024"
+
+    def test_month_name(self):
+        article = self._make_article("2024", "Jan", "01")
+        assert _extract_pub_date(article) == "2024-01-01"
+
+    def test_no_pub_date(self):
+        import xml.etree.ElementTree as ET
+
+        article = ET.fromstring("<PubmedArticle><Article></Article></PubmedArticle>")
+        assert _extract_pub_date(article) == ""
+
+
+class TestExtractAuthors:
+    """Test _extract_authors edge cases."""
+
+    @staticmethod
+    def _make_author_xml(author_xml):
+        import xml.etree.ElementTree as ET
+
+        xml = f"<Article><AuthorList>{author_xml}</AuthorList></Article>"
+        return ET.fromstring(xml)
+
+    def test_author_without_forename(self):
+        elem = self._make_author_xml("<Author><LastName>OnlyLast</LastName></Author>")
+        authors = _extract_authors(elem)
+        assert len(authors) == 1
+        assert authors[0].family_name == "OnlyLast"
+        assert authors[0].given_name == ""
+        assert authors[0].name == "OnlyLast"
+
+    def test_author_without_lastname_skipped(self):
+        elem = self._make_author_xml("<Author><ForeName>NoLast</ForeName></Author>")
+        authors = _extract_authors(elem)
+        assert len(authors) == 0
+
+    def test_max_50_authors(self):
+        author_xml = "".join(
+            f"<Author><LastName>Author{i}</LastName><ForeName>A</ForeName></Author>"
+            for i in range(60)
+        )
+        elem = self._make_author_xml(author_xml)
+        authors = _extract_authors(elem)
+        assert len(authors) == 50

@@ -1,0 +1,21 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.2
+    hooks:
+      - id: ruff
+        args: [--fix, --unsafe-fixes]
+      - id: ruff-format
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.43.5
+    hooks:
+      - id: typos
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (type check)
+        entry: uv run ty check
+        language: system
+        types: [python]
+        pass_filenames: false

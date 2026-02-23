@@ -166,10 +166,15 @@ class PDFRetriever:
 
         # Priority 4a: Direct bioRxiv/medRxiv PDF for 10.1101/ DOIs
         if doi and doi.startswith("10.1101/"):
-            server = "medrxiv" if "medrxiv" in doi.lower() else "biorxiv"
-            biorxiv_pdf = f"https://www.{server}.org/content/{doi}v1.full.pdf"
-            if biorxiv_pdf not in urls:
-                urls.append(biorxiv_pdf)
+            preprint_server = "biorxiv"
+            if paper and (
+                "medrxiv" in paper.data_sources
+                or (paper.source_venue and "medrxiv" in paper.source_venue.name.lower())
+            ):
+                preprint_server = "medrxiv"
+            preprint_pdf = f"https://www.{preprint_server}.org/content/{doi}v1.full.pdf"
+            if preprint_pdf not in urls:
+                urls.append(preprint_pdf)
 
         # Priority 4b: DOI content negotiation
         if doi:

@@ -161,6 +161,22 @@ class TestArXivBioRxivURLs:
         urls = retriever._collect_urls(paper, "10.1038/nature12345")
         assert not any("biorxiv.org" in u for u in urls)
 
+    def test_medrxiv_url_used_when_data_source_is_medrxiv(self):
+        """Papers with medrxiv in data_sources get medrxiv.org URL, not biorxiv.org."""
+        from opencite.models import Source
+
+        paper = Paper(
+            title="Test",
+            ids=IDSet(doi="10.1101/2021.01.01.12345"),
+            data_sources={"medrxiv"},
+            source_venue=Source(name="medRxiv", is_oa=True),
+        )
+        retriever = self._make_retriever()
+        urls = retriever._collect_urls(paper, "10.1101/2021.01.01.12345")
+        medrxiv_urls = [u for u in urls if "medrxiv.org" in u]
+        assert len(medrxiv_urls) == 1
+        assert not any("biorxiv.org" in u for u in urls)
+
 
 class TestPublisherMap:
     def test_elsevier_prefix(self):

@@ -104,8 +104,8 @@ class SearchOrchestrator:
                 papers = await task
                 source_counts[source_name] = len(papers)
                 all_papers.extend(papers)
-            except Exception:
-                logger.warning("Search failed for source: %s", source_name)
+            except Exception as exc:
+                logger.warning("Search failed for source %s: %s", source_name, exc)
                 source_counts[source_name] = 0
 
         # Deduplicate and merge

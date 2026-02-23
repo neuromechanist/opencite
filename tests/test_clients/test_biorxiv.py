@@ -2,16 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from opencite.clients.biorxiv import BioRxivClient
 from opencite.config import Config
-
-
-@pytest.fixture
-def config() -> Config:
-    return Config.from_env()
-
 
 # ---------------------------------------------------------------------------
 # Sample API responses
@@ -121,7 +113,37 @@ class TestBioRxivClientParsing:
         assert paper is not None
         pdf = paper.best_pdf_url
         assert pdf is not None
-        assert "biorxiv.org" in pdf or "medrxiv.org" in pdf
+        assert "biorxiv.org" in pdf
+        assert "10.1101/2024.09.12.612645" in pdf
+        assert pdf.endswith(".full.pdf")
+
+    def test_parse_crossref_item_medrxiv_detection(self):
+        """container-title 'medRxiv' routes to medrxiv.org."""
+        item = {
+            **_CROSSREF_ITEM,
+            "DOI": "10.1101/2021.01.01.12345",
+            "title": ["A medRxiv preprint"],
+            "container-title": ["medRxiv"],
+        }
+        client = self._client()
+        paper = client._parse_crossref_item(item)
+        assert paper is not None
+        assert "medrxiv" in paper.data_sources
+        pdf = paper.best_pdf_url
+        assert pdf is not None
+        assert "medrxiv.org" in pdf
+
+    def test_parse_content_entry_medrxiv(self):
+        """server='medrxiv' sets data_sources and URL correctly."""
+        entry = {**_CONTENT_API_ENTRY, "doi": "10.1101/2021.01.01.12345"}
+        client = self._client()
+        paper = client._parse_content_entry(entry, server="medrxiv")
+        assert paper is not None
+        assert "medrxiv" in paper.data_sources
+        assert paper.url is not None and "medrxiv.org" in paper.url
+        pdf = paper.best_pdf_url
+        assert pdf is not None
+        assert "medrxiv.org" in pdf
 
     def test_parse_crossref_item_no_title_returns_none(self):
         item = {**_CROSSREF_ITEM, "title": []}

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import re
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
 from opencite.clients.base import BaseClient
+from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
 
 if TYPE_CHECKING:
@@ -20,10 +20,6 @@ BASE_URL = "https://export.arxiv.org/api"
 
 _ATOM_NS = "http://www.w3.org/2005/Atom"
 _ARXIV_NS = "http://arxiv.org/schemas/atom"
-
-# arXiv asks for at most 1 req/3 sec without an API key;
-# 3 req/sec is the absolute max for bulk access
-_DEFAULT_RATE = 3.0
 
 
 class ArXivClient(BaseClient):
@@ -62,31 +58,32 @@ class ArXivClient(BaseClient):
 
         Uses ``all:`` field so the query matches title, abstract, and authors.
         """
-        # Build arXiv query
-        # arXiv query syntax uses field prefixes; fall back to `all:`
-        search_query = f"all:{query}"
         params: dict[str, Any] = {
-            "search_query": search_query,
+            "search_query": f"all:{query}",
             "start": 0,
             "max_results": min(max_results, 200),
             "sortBy": "relevance",
             "sortOrder": "descending",
         }
 
-        resp = await self.get("/query", params=params)
+        try:
+            resp = await self.get("/query", params=params)
+        except APIError as e:
+            logger.warning("arXiv search failed for query %r: %s", query, e.message)
+            return []
         return self._parse_feed(resp.text, year_from=year_from, year_to=year_to)
 
     async def lookup_arxiv_id(self, arxiv_id: str) -> Paper | None:
         """Look up a single paper by arXiv ID (e.g. ``2106.15928`` or ``cs.LG/0101001``)."""
-        clean_id = arxiv_id.strip()
-        # Strip version suffix for the API call (arXiv returns latest by default)
-        bare_id = clean_id.split("v")[0] if "v" in clean_id.lower() else clean_id
+        # Use regex to strip version suffix so old-style IDs like
+        # "solv-int/9901001" are not corrupted by a naive split("v").
+        bare_id = re.sub(r"v\d+$", "", arxiv_id.strip())
         try:
             resp = await self.get("/query", params={"id_list": bare_id})
             papers = self._parse_feed(resp.text)
             return papers[0] if papers else None
-        except Exception:
-            logger.debug("arXiv lookup failed for %s", arxiv_id)
+        except APIError as e:
+            logger.warning("arXiv lookup failed for %s: %s", arxiv_id, e.message)
             return None
 
     # ------------------------------------------------------------------
@@ -102,8 +99,12 @@ class ArXivClient(BaseClient):
         """Parse an Atom feed response into a list of Papers."""
         try:
             root = ET.fromstring(xml_text)
-        except ET.ParseError:
-            logger.warning("arXiv: failed to parse Atom XML")
+        except ET.ParseError as exc:
+            logger.warning(
+                "arXiv: failed to parse Atom XML (%s). Preview: %.100r",
+                exc,
+                xml_text,
+            )
             return []
 
         papers: list[Paper] = []
@@ -153,8 +154,10 @@ class ArXivClient(BaseClient):
         pub_date = ""
         if published:
             pub_date = published[:10]  # "YYYY-MM-DD"
-            with contextlib.suppress(ValueError):
+            try:
                 year = int(published[:4])
+            except ValueError:
+                logger.debug("arXiv: unexpected date format %r", published)
 
         # Authors
         authors: list[Author] = []
@@ -205,13 +208,10 @@ class ArXivClient(BaseClient):
         # HTML URL
         url = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else raw_id
 
-        # Journal ref (if published)
+        # Journal ref (if published in a journal)
         journal_ref = _text("journal_ref", ns=_ARXIV_NS)
         if journal_ref and source_venue:
-            source_venue = Source(
-                name=journal_ref,
-                is_oa=source_venue.is_oa,
-            )
+            source_venue = Source(name=journal_ref, is_oa=source_venue.is_oa)
         elif journal_ref:
             source_venue = Source(name=journal_ref)
 

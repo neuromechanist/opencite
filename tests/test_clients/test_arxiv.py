@@ -4,16 +4,8 @@ from __future__ import annotations
 
 import textwrap
 
-import pytest
-
 from opencite.clients.arxiv import ArXivClient
 from opencite.config import Config
-
-
-@pytest.fixture
-def config() -> Config:
-    return Config.from_env()
-
 
 # ---------------------------------------------------------------------------
 # Atom XML fixture (minimal but valid)

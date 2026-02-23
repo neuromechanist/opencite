@@ -14,9 +14,13 @@ throughput) is activated by supplying a contact email via ``config.contact_email
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 from opencite.clients.base import BaseClient
+from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
 
 if TYPE_CHECKING:
@@ -40,17 +44,37 @@ class BioRxivClient(BaseClient):
     Keyword search is routed through the CrossRef API (which indexes all
     bioRxiv/medRxiv DOIs).  Individual DOI lookups go to the bioRxiv Content
     API for authoritative metadata.
+
+    The CrossRef client is held as a long-lived session (initialised in
+    ``__aenter__``) so connection pooling and the shared rate limiter are
+    reused across calls.
     """
 
     def __init__(self, config: Config) -> None:
-        # Use bioRxiv Content API as the base URL; CrossRef calls use a
-        # separate httpx session to avoid base-URL clashes.
+        # bioRxiv Content API is the BaseClient base_url (used by lookup_doi).
+        # CrossRef uses a separate session managed below.
         super().__init__(
             config=config,
             base_url=_BIORXIV_BASE,
             rate_limit=config.biorxiv_rate_limit,
             burst=5,
         )
+        self._crossref_client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> BioRxivClient:
+        await super().__aenter__()
+        self._crossref_client = httpx.AsyncClient(
+            base_url=_CROSSREF_BASE,
+            timeout=self.timeout,
+            headers=self._default_headers(),
+        )
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        if self._crossref_client:
+            await self._crossref_client.aclose()
+            self._crossref_client = None
+        await super().__aexit__(*args)
 
     def _default_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
@@ -63,35 +87,18 @@ class BioRxivClient(BaseClient):
     # Public API
     # ------------------------------------------------------------------
 
-    async def search(
-        self,
-        query: str,
-        max_results: int = 20,
-        server: str = "biorxiv",
-    ) -> list[Paper]:
+    async def search(self, query: str, max_results: int = 20) -> list[Paper]:
         """Search bioRxiv/medRxiv via CrossRef.
 
-        Args:
-            query: Free-text query.
-            max_results: Maximum number of results to return.
-            server: ``"biorxiv"``, ``"medrxiv"``, or ``"both"``.
-                    bioRxiv and medRxiv share the ``10.1101/`` DOI prefix;
-                    when set to ``"both"`` (default behavior when caller
-                    passes no preference) all preprints are returned.
+        Uses the ``prefix:10.1101`` DOI filter, which covers both bioRxiv and
+        medRxiv since they share the same DOI prefix.
         """
-        papers: list[Paper] = []
-
-        # All bioRxiv/medRxiv preprints use the 10.1101 DOI prefix.
-        # CrossRef's "container-title" field is unreliable for preprints, so
-        # we filter by prefix + type instead.
-        # The `server` param is kept for API consistency and future use when
-        # CrossRef improves preprint-server filtering.
-        _ = server  # intentionally unused until CrossRef supports it reliably
-        filter_parts = ["prefix:10.1101", f"type:{_PREPRINT_TYPE}"]
+        if self._crossref_client is None:
+            raise RuntimeError("Client not initialized. Use 'async with'.")
 
         params: dict[str, Any] = {
             "query.bibliographic": query,
-            "filter": ",".join(filter_parts),
+            "filter": f"prefix:10.1101,type:{_PREPRINT_TYPE}",
             "rows": min(max_results, 100),
             "select": (
                 "DOI,title,author,published,created,abstract,"
@@ -101,21 +108,33 @@ class BioRxivClient(BaseClient):
         if self.config.contact_email:
             params["mailto"] = self.config.contact_email
 
+        data: dict = {}
+        await self.rate_limiter.acquire()
         try:
-            import httpx
-
-            async with httpx.AsyncClient(
-                base_url=_CROSSREF_BASE,
-                timeout=self.timeout,
-                headers=self._default_headers(),
-            ) as client:
-                resp = await client.get("/works", params=params)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception:
-            logger.warning("BioRxiv CrossRef search failed for query: %s", query)
+            resp = await self._crossref_client.get("/works", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            logger.warning(
+                "CrossRef search HTTP %d for query %r",
+                e.response.status_code,
+                query,
+            )
+            return []
+        except httpx.TimeoutException:
+            logger.warning("CrossRef search timed out for query %r", query)
+            return []
+        except httpx.RequestError as e:
+            logger.warning("CrossRef search network error for query %r: %s", query, e)
+            return []
+        except ValueError as e:
+            # json.JSONDecodeError is a subclass of ValueError
+            logger.warning(
+                "CrossRef search returned non-JSON for query %r: %s", query, e
+            )
             return []
 
+        papers: list[Paper] = []
         for item in (data.get("message") or {}).get("items") or []:
             paper = self._parse_crossref_item(item)
             if paper:
@@ -126,24 +145,45 @@ class BioRxivClient(BaseClient):
         """Look up a single preprint by DOI using the bioRxiv Content API.
 
         Tries bioRxiv first, then medRxiv (both share the ``10.1101/`` prefix).
+        An empty collection means the DOI is not on that server; an exception
+        means an API error and is logged at WARNING.
         """
+        last_error: APIError | None = None
         for server in ("biorxiv", "medrxiv"):
             try:
                 resp = await self.get(f"/details/{server}/{doi}")
+            except APIError as e:
+                logger.warning(
+                    "bioRxiv Content API error for DOI %s on %s: %s",
+                    doi,
+                    server,
+                    e.message,
+                )
+                last_error = e
+                continue
+
+            try:
                 data = resp.json()
-            except Exception:
-                logger.debug("BioRxiv content API failed for %s on %s", doi, server)
+            except ValueError:
+                logger.warning(
+                    "bioRxiv Content API returned non-JSON for DOI %s on %s",
+                    doi,
+                    server,
+                )
                 continue
 
             collection = data.get("collection") or []
             if not collection:
+                # Genuinely not found on this server; try the other
                 continue
 
-            # Use the latest version (last entry)
             entry = collection[-1]
             return self._parse_content_entry(entry, server=server)
 
-        logger.debug("BioRxiv: no results for DOI %s on either server", doi)
+        if last_error:
+            logger.warning("bioRxiv: DOI %s lookup failed on both servers", doi)
+        else:
+            logger.debug("bioRxiv: DOI %s not found on either server", doi)
         return None
 
     # ------------------------------------------------------------------
@@ -159,11 +199,8 @@ class BioRxivClient(BaseClient):
         if not title:
             return None
 
-        # Version
         version = str(entry.get("version") or "1")
-
-        arxiv_id = ""
-        ids = IDSet(doi=doi, arxiv_id=arxiv_id)
+        ids = IDSet(doi=doi)
 
         # Date
         date_str = (entry.get("date") or "")[:10]  # "YYYY-MM-DD"
@@ -171,7 +208,7 @@ class BioRxivClient(BaseClient):
         if date_str and date_str[:4].isdigit():
             year = int(date_str[:4])
 
-        # Authors  -- stored as "Smith J, Jones AB, ..."
+        # Authors -- stored as "Smith J; Jones AB; ..."
         raw_authors = entry.get("authors") or ""
         authors: list[Author] = []
         if raw_authors:
@@ -179,7 +216,6 @@ class BioRxivClient(BaseClient):
                 name = raw.strip()
                 if not name:
                     continue
-                # Typical format: "Smith J" or "Smith Jane"
                 parts = name.split()
                 family = parts[0] if parts else name
                 given = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -189,13 +225,9 @@ class BioRxivClient(BaseClient):
         if len(abstract) > 1000:
             abstract = abstract[:1000]
 
-        # Category
         category = (entry.get("category") or "").strip()
         topics = [category] if category else []
-        source_venue = Source(
-            name=server.capitalize(),
-            is_oa=True,
-        )
+        source_venue = Source(name=server.capitalize(), is_oa=True)
 
         # Direct PDF URL: bioRxiv always provides versioned PDFs
         pdf_locations: list[PDFLocation] = []
@@ -261,20 +293,20 @@ class BioRxivClient(BaseClient):
         abstract = (item.get("abstract") or "").strip()
         # CrossRef wraps abstracts in JATS XML tags
         if "<" in abstract:
-            import re
-
             abstract = re.sub(r"<[^>]+>", "", abstract).strip()
         if len(abstract) > 1000:
             abstract = abstract[:1000]
 
+        # Determine server from container-title (CrossRef CAN carry this info,
+        # unlike the DOI which is shared between bioRxiv and medRxiv)
         container = item.get("container-title") or []
         server_name = container[0].lower() if container else "biorxiv"
+        server = "medrxiv" if "medrxiv" in server_name else "biorxiv"
         source_venue = Source(name=server_name.capitalize(), is_oa=True)
 
-        # PDF URL from DOI
+        # PDF URL
         pdf_locations: list[PDFLocation] = []
         if doi:
-            server = "medrxiv" if "medrxiv" in server_name else "biorxiv"
             pdf_url = f"https://www.{server}.org/content/{doi}v1.full.pdf"
             pdf_locations.append(
                 PDFLocation(
@@ -286,7 +318,6 @@ class BioRxivClient(BaseClient):
             )
 
         url = (item.get("URL") or f"https://doi.org/{doi}") if doi else ""
-
         citation_count = item.get("is-referenced-by-count") or 0
 
         return Paper(
@@ -302,5 +333,5 @@ class BioRxivClient(BaseClient):
             url=url,
             pdf_locations=pdf_locations,
             citation_count=citation_count,
-            data_sources={"biorxiv"},
+            data_sources={server},
         )

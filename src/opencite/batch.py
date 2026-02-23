@@ -97,6 +97,33 @@ def read_ids_from_stdin() -> list[str]:
     return ids
 
 
+def prepare_output_dirs(
+    output_dir: str | Path, convert: bool
+) -> tuple[Path, Path | None, Path | None]:
+    """Create output directories for batch download.
+
+    When convert is True, creates pdf/, markdown/, and markdown/img/
+    subdirectories. When False, uses output_dir directly.
+
+    Returns:
+        Tuple of (pdf_dir, md_dir, img_dir). md_dir and img_dir are
+        None when convert is False.
+    """
+    out = Path(output_dir)
+
+    if convert:
+        pdf_dir = out / "pdf"
+        md_dir = out / "markdown"
+        img_dir = md_dir / "img"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        md_dir.mkdir(parents=True, exist_ok=True)
+        img_dir.mkdir(parents=True, exist_ok=True)
+        return pdf_dir, md_dir, img_dir
+
+    out.mkdir(parents=True, exist_ok=True)
+    return out, None, None
+
+
 async def batch_download(
     ids: list[str],
     config: Config,
@@ -120,19 +147,24 @@ async def batch_download(
     """
     result = BatchResult(total=len(ids))
     semaphore = asyncio.Semaphore(concurrency)
-    out = Path(output_dir)
+    pdf_dir, md_dir, img_dir = prepare_output_dirs(output_dir, convert)
 
-    # When converting, use pdf/ and markdown/ subdirectories
+    # Determine if image extraction is available (mistral only)
+    use_extract_images = False
     if convert:
-        pdf_dir = out / "pdf"
-        md_dir = out / "markdown"
-        img_dir = md_dir / "img"
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-        md_dir.mkdir(parents=True, exist_ok=True)
-        img_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        pdf_dir = out
-        pdf_dir.mkdir(parents=True, exist_ok=True)
+        from opencite.convert import _pick_converter
+
+        effective = (
+            converter
+            if converter != "auto"
+            else _pick_converter(config.mistral_api_key)
+        )
+        use_extract_images = effective == "mistral"
+        if not use_extract_images and img_dir is not None:
+            logger.info(
+                "Image extraction requires markit-mistral (MISTRAL_API_KEY). "
+                "Using markitdown; images will not be extracted."
+            )
 
     async def _process_one(identifier: str, retriever: PDFRetriever) -> None:
         async with semaphore:
@@ -150,21 +182,30 @@ async def batch_download(
                 result.downloaded += 1
                 print(f"  OK: {identifier} -> {path.name}", file=sys.stderr)
 
-                if convert:
+                if convert and md_dir is not None:
                     try:
                         from opencite.convert import convert_pdf
 
                         md_out = md_dir / path.with_suffix(".md").name
+                        # Per-paper image dir to avoid filename collisions
+                        paper_img_dir = None
+                        if use_extract_images and img_dir is not None:
+                            paper_img_dir = img_dir / path.stem
+                            paper_img_dir.mkdir(parents=True, exist_ok=True)
+
                         convert_pdf(
                             str(path),
                             output_path=str(md_out),
                             converter=converter,
-                            extract_images=True,
-                            images_dir=str(img_dir),
+                            extract_images=use_extract_images,
+                            images_dir=str(paper_img_dir) if paper_img_dir else None,
                             mistral_api_key=config.mistral_api_key,
                         )
                         result.converted += 1
                     except Exception as e:
+                        logger.debug(
+                            "Conversion error for %s", identifier, exc_info=True
+                        )
                         result.conversion_failed.append((identifier, str(e)))
                         print(
                             f"  CONVERT FAIL: {identifier} ({e})",

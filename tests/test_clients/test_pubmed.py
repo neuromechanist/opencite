@@ -146,6 +146,20 @@ class TestParsePubmedXml:
         papers = _parse_pubmed_xml(xml)
         assert papers == []
 
+    def test_parse_article_with_empty_title(self):
+        xml = """\
+<?xml version="1.0" ?>
+<PubmedArticleSet>
+<PubmedArticle>
+    <MedlineCitation>
+        <PMID>12345</PMID>
+        <Article><ArticleTitle></ArticleTitle></Article>
+    </MedlineCitation>
+</PubmedArticle>
+</PubmedArticleSet>"""
+        papers = _parse_pubmed_xml(xml)
+        assert papers == []
+
     def test_abstract_truncated_at_1000(self):
         long_text = "A" * 1200
         xml = f"""\
@@ -509,6 +523,12 @@ class TestExtractPubDate:
     def test_month_name(self):
         article = self._make_article("2024", "Jan", "01")
         assert _extract_pub_date(article) == "2024-01-01"
+
+    def test_no_pub_date(self):
+        import xml.etree.ElementTree as ET
+
+        article = ET.fromstring("<PubmedArticle><Article></Article></PubmedArticle>")
+        assert _extract_pub_date(article) == ""
 
 
 class TestExtractAuthors:

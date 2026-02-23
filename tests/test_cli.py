@@ -174,16 +174,12 @@ class TestCLIArgParsing:
         assert args.id == ["12345", "PMC67890"]
         assert args.format == "json"
 
-    def test_no_command_returns_zero(self):
+    def test_no_command_returns_zero(self, monkeypatch):
         from opencite.cli import main
 
-        sys_argv_backup = sys.argv
-        sys.argv = ["opencite"]
-        try:
-            result = main()
-            assert result == 0
-        finally:
-            sys.argv = sys_argv_backup
+        monkeypatch.setattr("sys.argv", ["opencite"])
+        result = main()
+        assert result == 0
 
     def test_bibtex_format_in_search(self):
         from opencite.cli import create_parser
@@ -362,105 +358,67 @@ class TestWriteOutput:
 
 
 class TestMainErrorHandling:
-    def test_no_command_prints_help(self):
-        import sys
-
+    def test_no_command_prints_help(self, monkeypatch):
         from opencite.cli import main
 
-        orig = sys.argv
-        sys.argv = ["opencite"]
-        try:
-            result = main()
-            assert result == 0
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr("sys.argv", ["opencite"])
+        result = main()
+        assert result == 0
 
-    def test_config_show_via_main(self, capsys):
+    def test_config_show_via_main(self, capsys, monkeypatch):
         """main() dispatches config show correctly."""
-        import sys
-
         from opencite.cli import main
 
-        orig = sys.argv
-        sys.argv = ["opencite", "config", "show"]
-        try:
-            result = main()
-            assert result == 0
-            captured = capsys.readouterr()
-            assert "Resolved" in captured.out
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr("sys.argv", ["opencite", "config", "show"])
+        result = main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Resolved" in captured.out
 
-    def test_config_path_via_main(self, capsys):
+    def test_config_path_via_main(self, capsys, monkeypatch):
         """main() dispatches config path correctly."""
-        import sys
-
         from opencite.cli import main
 
-        orig = sys.argv
-        sys.argv = ["opencite", "config", "path"]
-        try:
-            result = main()
-            assert result == 0
-            captured = capsys.readouterr()
-            assert "config.toml" in captured.out
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr("sys.argv", ["opencite", "config", "path"])
+        result = main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "config.toml" in captured.out
 
-    def test_debug_flag_is_accepted(self):
+    def test_debug_flag_is_accepted(self, monkeypatch):
         """main() accepts --debug flag without crashing."""
-        import sys
-
         from opencite.cli import main
 
-        orig = sys.argv
-        sys.argv = ["opencite", "--debug", "config", "show"]
-        try:
-            result = main()
-            assert result == 0
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr("sys.argv", ["opencite", "--debug", "config", "show"])
+        result = main()
+        assert result == 0
 
     def test_config_init_via_main(self, capsys, tmp_path, monkeypatch):
         """main() dispatches config init correctly."""
-        import sys
-
         from opencite.cli import main
 
-        # Point config to temp dir to avoid modifying real config
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+        monkeypatch.setattr("sys.argv", ["opencite", "config", "init"])
+        result = main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Created config file" in captured.out
 
-        orig = sys.argv
-        sys.argv = ["opencite", "config", "init"]
-        try:
-            result = main()
-            assert result == 0
-            captured = capsys.readouterr()
-            assert "Created config file" in captured.out
-        finally:
-            sys.argv = orig
-
-    def test_convert_file_not_found(self, capsys):
+    def test_convert_file_not_found(self, capsys, monkeypatch):
         """main() convert subcommand handles FileNotFoundError."""
-        import sys
-
         from opencite.cli import main
 
-        orig = sys.argv
-        sys.argv = ["opencite", "convert", "/nonexistent/paper.pdf"]
-        try:
-            result = main()
-            assert result == 1
-            captured = capsys.readouterr()
-            assert "Error" in captured.err
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr(
+            "sys.argv", ["opencite", "convert", "/nonexistent/paper.pdf"]
+        )
+        result = main()
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.err
 
     def test_convert_to_stdout(self, capsys, tmp_path, monkeypatch):
         """main() convert subcommand outputs to stdout without -o."""
-        import sys
-
         import opencite.convert as conv
         from opencite.cli import main
 
@@ -469,20 +427,14 @@ class TestMainErrorHandling:
         pdf = tmp_path / "test.pdf"
         pdf.write_bytes(b"%PDF-1.4 fake content")
 
-        orig = sys.argv
-        sys.argv = ["opencite", "convert", str(pdf)]
-        try:
-            result = main()
-            assert result == 0
-            captured = capsys.readouterr()
-            assert "# Output" in captured.out
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr("sys.argv", ["opencite", "convert", str(pdf)])
+        result = main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "# Output" in captured.out
 
     def test_convert_to_file(self, capsys, tmp_path, monkeypatch):
         """main() convert subcommand writes to file with -o."""
-        import sys
-
         import opencite.convert as conv
         from opencite.cli import main
 
@@ -492,69 +444,53 @@ class TestMainErrorHandling:
         pdf.write_bytes(b"%PDF-1.4 fake content")
         out = tmp_path / "test.md"
 
-        orig = sys.argv
-        sys.argv = ["opencite", "convert", str(pdf), "-o", str(out)]
-        try:
-            result = main()
-            assert result == 0
-            captured = capsys.readouterr()
-            assert "Converted" in captured.err
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr(
+            "sys.argv", ["opencite", "convert", str(pdf), "-o", str(out)]
+        )
+        result = main()
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Converted" in captured.err
 
-    def test_batch_fetch_file_not_found(self, capsys):
+    def test_batch_fetch_file_not_found(self, capsys, monkeypatch):
         """batch-fetch with nonexistent file returns error."""
-        import sys
-
         from opencite.cli import main
 
-        orig = sys.argv
-        sys.argv = ["opencite", "batch-fetch", "/nonexistent/dois.txt"]
-        try:
-            result = main()
-            assert result == 1
-            captured = capsys.readouterr()
-            assert "Error" in captured.err
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr(
+            "sys.argv", ["opencite", "batch-fetch", "/nonexistent/dois.txt"]
+        )
+        result = main()
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.err
 
-    def test_batch_fetch_empty_file(self, capsys, tmp_path):
+    def test_batch_fetch_empty_file(self, capsys, tmp_path, monkeypatch):
         """batch-fetch with empty file returns 'no identifiers'."""
-        import sys
-
         from opencite.cli import main
 
         empty_file = tmp_path / "empty.txt"
         empty_file.write_text("")
 
-        orig = sys.argv
-        sys.argv = ["opencite", "batch-fetch", str(empty_file)]
-        try:
-            result = main()
-            assert result == 1
-            captured = capsys.readouterr()
-            assert "No identifiers" in captured.err
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr("sys.argv", ["opencite", "batch-fetch", str(empty_file)])
+        result = main()
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "No identifiers" in captured.err
 
-    def test_batch_fetch_invalid_json(self, capsys, tmp_path):
+    def test_batch_fetch_invalid_json(self, capsys, tmp_path, monkeypatch):
         """batch-fetch with invalid JSON returns error."""
-        import sys
-
         from opencite.cli import main
 
         bad_json = tmp_path / "bad.json"
         bad_json.write_text("{{{invalid")
 
-        orig = sys.argv
-        sys.argv = ["opencite", "batch-fetch", "--from-json", str(bad_json)]
-        try:
-            result = main()
-            assert result == 1
-            captured = capsys.readouterr()
-            assert "Error" in captured.err
-        finally:
-            sys.argv = orig
+        monkeypatch.setattr(
+            "sys.argv", ["opencite", "batch-fetch", "--from-json", str(bad_json)]
+        )
+        result = main()
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "Error" in captured.err
 
 
 @pytest.mark.integration

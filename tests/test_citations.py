@@ -75,8 +75,6 @@ class TestSortPapers:
 
 
 class TestGatherPapers:
-    import asyncio
-
     async def test_gathers_from_multiple_tasks(self):
         import asyncio
 
@@ -174,7 +172,7 @@ class TestCitationExplorerIntegration:
         async with CitationExplorer(config) as explorer:
             result = await explorer.citing_papers("pmid:34265844", max_results=5)
         assert result.seed_paper is not None
-        assert len(result.papers) >= 0  # may vary
+        assert isinstance(result.papers, list)
 
     async def test_references_by_arxiv(self, config: Config):
         # "Attention Is All You Need"

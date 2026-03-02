@@ -1,5 +1,5 @@
 ---
-name: OpenCite CLI
+name: opencite
 description: This skill should be used when the user asks to "search for papers", "find citations", "look up a DOI", "get BibTeX", "download PDF", "convert PDF to markdown", "find canonical papers", "convert identifiers", "batch download papers", "configure opencite", or mentions opencite, academic literature search, citation management, or paper retrieval.
 version: 0.3.0
 ---

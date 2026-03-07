@@ -52,6 +52,9 @@ class PDFRetriever:
     2. Paper's known PDF locations (OpenAlex, S2)
     3. PMC OA Service (if PMCID available or discoverable)
     4. DOI content negotiation
+
+    When the caller wants markdown (retrieve_as_markdown), the retriever
+    first tries PMC full-text retrieval to skip the PDF step entirely.
     """
 
     def __init__(self, config: Config):
@@ -298,6 +301,76 @@ class PDFRetriever:
                 "Paper may be available via institutional access: https://doi.org/%s",
                 doi,
             )
+
+    async def retrieve_as_markdown(
+        self,
+        identifier: str,
+        output_dir: str = ".",
+        paper: Paper | None = None,
+        extract_images: bool = True,
+        converter: str = "auto",
+        filename: str | None = None,
+    ) -> Path | None:
+        """Try PMC full-text first, then fall back to PDF download + convert.
+
+        Args:
+            identifier: DOI or other paper identifier.
+            output_dir: Directory to save output (markdown and optional images).
+            paper: Pre-fetched Paper object.
+            extract_images: Whether to extract/download images.
+            converter: Converter for PDF fallback ("auto", "markitdown", "mistral").
+            filename: Custom base filename (without extension).
+
+        Returns:
+            Path to the markdown file, or None if all methods fail.
+        """
+        from opencite.fulltext import FullTextRetriever
+
+        # If no paper provided, try to get metadata
+        if paper is None:
+            paper = await self._quick_lookup(identifier)
+
+        # Try PMC full-text first
+        async with FullTextRetriever(self.config) as ft:
+            md_path = await ft.retrieve(
+                identifier=identifier,
+                output_dir=output_dir,
+                paper=paper,
+                extract_images=extract_images,
+                filename=filename,
+            )
+            if md_path:
+                logger.info("Retrieved full text from PMC for %s", identifier)
+                return md_path
+
+        # Fall back to PDF download + conversion
+        logger.debug("PMC full text not available for %s, trying PDF", identifier)
+        pdf_path = await self.download(
+            identifier=identifier,
+            output_dir=output_dir,
+            paper=paper,
+            filename=filename,
+        )
+
+        if pdf_path is None:
+            return None
+
+        # Convert PDF to markdown
+        from opencite.convert import convert_pdf
+
+        md_out = pdf_path.with_suffix(".md")
+        try:
+            convert_pdf(
+                str(pdf_path),
+                output_path=str(md_out),
+                converter=converter,
+                extract_images=extract_images,
+                mistral_api_key=self.config.mistral_api_key,
+            )
+            return md_out
+        except Exception as e:
+            logger.warning("PDF conversion failed for %s: %s", identifier, e)
+            return None
 
     def _make_filename(self, paper: Paper | None, identifier: str) -> str:
         """Generate a filename from paper metadata."""

@@ -40,21 +40,24 @@ uv run ruff format src/ tests/   # format
 - `exceptions.py` -- `OpenCiteError` hierarchy: `APIError`, `RateLimitError`, `APIKeyError`, etc.
 - `cli.py` -- argparse with subcommands: search, lookup, cite, canonical, pdf, convert, ids, batch-fetch, config
 - `utils.py` -- title normalization, fuzzy matching, author name parsing, abstract reconstruction
-- `clients/` -- per-API async clients with rate limiting (base.py, openalex.py, semantic_scholar.py, pubmed.py, arxiv.py, biorxiv.py, id_converter.py)
+- `clients/` -- per-API async clients with rate limiting (base.py, openalex.py, semantic_scholar.py, pubmed.py, arxiv.py, biorxiv.py, pmc.py, id_converter.py)
 - `search.py` -- `SearchOrchestrator` for parallel multi-source search with dedup/merge
 - `citations.py` -- `CitationExplorer` for citation graph traversal and canonical paper discovery
 - `dedup.py` -- DOI + fuzzy title deduplication with paper merging
 - `bibtex.py` -- BibTeX fetch (S2 citationStyles, DOI negotiation) and generation
-- `pdf.py` -- multi-source PDF retrieval pipeline with publisher-authenticated downloads
+- `pdf.py` -- multi-source PDF retrieval pipeline with publisher-authenticated downloads; `retrieve_as_markdown()` tries PMC full text before PDF fallback
+- `fulltext.py` -- `FullTextRetriever` for PMC BioC full-text retrieval, bypasses PDF pipeline for OA articles
+- `pmc_convert.py` -- BioC JSON to markdown converter with section structure, figures, tables, and references
 - `convert.py` -- PDF-to-markdown (markitdown, markit-mistral; both included by default) with image extraction support
-- `batch.py` -- batch PDF download and conversion with controlled concurrency; organizes into pdf/, markdown/, markdown/img/ subdirs when converting
+- `batch.py` -- batch PDF download and conversion with controlled concurrency; prefers PMC full text when converting; organizes into pdf/, markdown/, markdown/img/ subdirs
 - `formatters/` -- output formatters (text, json, bibtex, csv)
 
 ### Key Design Patterns
 - **IDSet** is frozen (immutable) and centralizes all identifier types (DOI, PMID, PMCID, OpenAlex, S2, ArXiv) for cross-API lookup
 - **Paper.data_sources** tracks which APIs contributed data (provenance)
 - **BaseClient** ABC provides rate limiting (token bucket), retry with backoff, httpx session management
-- Rate limits: OpenAlex 100 req/sec, PubMed 10 req/sec, Semantic Scholar 1 req/sec, arXiv 3 req/sec, bioRxiv 10 req/sec
+- Rate limits: OpenAlex 100 req/sec, PubMed 10 req/sec, Semantic Scholar 1 req/sec, arXiv 3 req/sec, bioRxiv 10 req/sec, PMC 3 req/sec
+- **Full-text retrieval** (when `--convert` is used): PMC BioC API for OA articles -> structured markdown (no PDF needed). Uses `--no-fulltext` to skip.
 - PDF retrieval tries sources in priority: publisher APIs (if tokens configured) -> OpenAlex/S2 PDF locations -> PMC OA -> direct arXiv/bioRxiv URL -> DOI content negotiation
 - PDF-to-markdown `auto` mode: if `MISTRAL_API_KEY` is set, use markit-mistral (better for math/complex layouts); otherwise fall back to markitdown (free)
 - Config loading priority: TOML < `.env` files < environment variables
@@ -63,7 +66,7 @@ uv run ruff format src/ tests/   # format
 ### API Integrations
 - **OpenAlex** -- `pyalex` library; broadest coverage (250M+ works); best for PDF URLs, filtering, citation counts
 - **Semantic Scholar** -- `httpx` REST; TLDR summaries, SPECTER embeddings, batch 500 IDs, `citationStyles` for BibTeX
-- **PubMed/PMC** -- NCBI eutils XML; MeSH terms, PMC full text, ID Converter API
+- **PubMed/PMC** -- NCBI eutils XML; MeSH terms, ID Converter API; PMC BioC REST API for structured full-text (OA subset, ~4M+ articles)
 - **arXiv** -- Atom v1 API; search + direct lookup by arXiv ID; no key required; direct PDF at `arxiv.org/pdf/{id}`
 - **bioRxiv/medRxiv** -- CrossRef (`prefix:10.1101`) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required
 

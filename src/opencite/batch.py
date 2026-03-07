@@ -25,6 +25,7 @@ class BatchResult:
     total: int = 0
     downloaded: int = 0
     converted: int = 0
+    fulltext_retrieved: int = 0
     failed: list[tuple[str, str]] = field(default_factory=list)
     conversion_failed: list[tuple[str, str]] = field(default_factory=list)
 
@@ -33,6 +34,7 @@ class BatchResult:
             "total": self.total,
             "downloaded": self.downloaded,
             "converted": self.converted,
+            "fulltext_retrieved": self.fulltext_retrieved,
             "failed": [{"id": id_, "reason": reason} for id_, reason in self.failed],
             "conversion_failed": [
                 {"id": id_, "reason": reason} for id_, reason in self.conversion_failed
@@ -131,8 +133,13 @@ async def batch_download(
     convert: bool = False,
     converter: str = "auto",
     concurrency: int = 3,
+    prefer_fulltext: bool = True,
 ) -> BatchResult:
     """Download PDFs for multiple papers with controlled concurrency.
+
+    When convert=True and prefer_fulltext=True, tries PMC full-text
+    retrieval first (bypassing PDF entirely). Falls back to PDF download
+    + conversion if full text is not available.
 
     Args:
         ids: List of DOIs or other identifiers.
@@ -141,6 +148,7 @@ async def batch_download(
         convert: Whether to also convert to markdown.
         converter: Converter to use for markdown conversion.
         concurrency: Max concurrent downloads.
+        prefer_fulltext: Try PMC full-text before PDF when converting.
 
     Returns:
         BatchResult with summary statistics.
@@ -169,6 +177,24 @@ async def batch_download(
     async def _process_one(identifier: str, retriever: PDFRetriever) -> None:
         async with semaphore:
             try:
+                # When converting, try PMC full-text first
+                if convert and prefer_fulltext and md_dir is not None:
+                    md_path = await retriever.retrieve_as_markdown(
+                        identifier=identifier,
+                        output_dir=str(md_dir),
+                        extract_images=True,
+                        converter=converter,
+                    )
+                    if md_path:
+                        result.fulltext_retrieved += 1
+                        result.converted += 1
+                        print(
+                            f"  OK (fulltext): {identifier} -> {md_path.name}",
+                            file=sys.stderr,
+                        )
+                        return
+
+                # PDF-only download (or fulltext failed/disabled)
                 path = await retriever.download(
                     identifier=identifier,
                     output_dir=str(pdf_dir),

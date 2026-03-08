@@ -14,6 +14,7 @@ from opencite.pdf import PDFRetriever
 
 if TYPE_CHECKING:
     from opencite.config import Config
+    from opencite.fulltext import FullTextRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -174,17 +175,24 @@ async def batch_download(
                 "Using markitdown; images will not be extracted."
             )
 
-    async def _process_one(identifier: str, retriever: PDFRetriever) -> None:
+    async def _try_fulltext(
+        identifier: str, ft_retriever: FullTextRetriever
+    ) -> Path | None:
+        """Try PMC full-text retrieval (returns markdown path or None)."""
+        return await ft_retriever.retrieve(
+            identifier=identifier,
+            output_dir=str(md_dir),
+            extract_images=True,
+        )
+
+    async def _process_one(
+        identifier: str, retriever: PDFRetriever, ft_retriever: FullTextRetriever | None
+    ) -> None:
         async with semaphore:
             try:
                 # When converting, try PMC full-text first
-                if convert and prefer_fulltext and md_dir is not None:
-                    md_path = await retriever.retrieve_as_markdown(
-                        identifier=identifier,
-                        output_dir=str(md_dir),
-                        extract_images=True,
-                        converter=converter,
-                    )
+                if convert and prefer_fulltext and md_dir is not None and ft_retriever:
+                    md_path = await _try_fulltext(identifier, ft_retriever)
                     if md_path:
                         result.fulltext_retrieved += 1
                         result.converted += 1
@@ -243,8 +251,22 @@ async def batch_download(
                 result.failed.append((identifier, str(e)))
                 print(f"  FAIL: {identifier} ({e})", file=sys.stderr)
 
-    async with PDFRetriever(config) as retriever:
-        tasks = [asyncio.create_task(_process_one(id_, retriever)) for id_ in ids]
-        await asyncio.gather(*tasks)
+    ft_instance: FullTextRetriever | None = None
+    if convert and prefer_fulltext:
+        from opencite.fulltext import FullTextRetriever as _FTR
+
+        ft_instance = _FTR(config)
+        await ft_instance.__aenter__()
+
+    try:
+        async with PDFRetriever(config) as retriever:
+            tasks = [
+                asyncio.create_task(_process_one(id_, retriever, ft_instance))
+                for id_ in ids
+            ]
+            await asyncio.gather(*tasks)
+    finally:
+        if ft_instance is not None:
+            await ft_instance.__aexit__()
 
     return result

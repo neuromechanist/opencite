@@ -60,10 +60,12 @@ class PMCClient(BaseClient):
 
     @staticmethod
     def _normalize_pmcid(pmcid: str) -> str:
-        """Ensure PMCID has the PMC prefix."""
+        """Ensure PMCID has the PMC prefix and is uppercase."""
         pmcid = pmcid.strip()
         if not pmcid.upper().startswith("PMC"):
             pmcid = f"PMC{pmcid}"
+        elif not pmcid.startswith("PMC"):
+            pmcid = "PMC" + pmcid[3:]
         return pmcid
 
     async def fetch_full_text(self, pmcid: str) -> dict | None:
@@ -84,7 +86,7 @@ class PMCClient(BaseClient):
         except APIError as e:
             logger.debug("BioC API error for %s: %s", pmcid, e)
             return None
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, KeyError) as e:
             logger.debug("BioC fetch failed for %s: %s", pmcid, e)
             return None
 

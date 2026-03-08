@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,8 +49,9 @@ class PDFRetriever:
     Retrieval priority:
     1. Publisher-authenticated URLs (if tokens available)
     2. Paper's known PDF locations (OpenAlex, S2)
-    3. PMC OA Service (if PMCID available or discoverable)
-    4. DOI content negotiation
+    3. Direct arXiv/bioRxiv/medRxiv PDF URLs
+    4. PMC OA Service (if PMCID available or discoverable)
+    5. DOI content negotiation
 
     When the caller wants markdown (retrieve_as_markdown), the retriever
     first tries PMC full-text retrieval to skip the PDF step entirely.
@@ -368,26 +368,12 @@ class PDFRetriever:
                 mistral_api_key=self.config.mistral_api_key,
             )
             return md_out
-        except Exception as e:
+        except (OSError, ValueError, ImportError) as e:
             logger.warning("PDF conversion failed for %s: %s", identifier, e)
             return None
 
     def _make_filename(self, paper: Paper | None, identifier: str) -> str:
         """Generate a filename from paper metadata."""
-        if paper and paper.title:
-            # first_author_year_firstwords
-            author = ""
-            if paper.authors:
-                a = paper.authors[0]
-                author = a.family_name or a.name.split(",")[0].strip()
-                author = re.sub(r"[^\w]", "", author)
+        from opencite.utils import make_paper_filename
 
-            year = paper.year_str
-            words = paper.title.split()[:3]
-            title_part = "_".join(re.sub(r"[^\w]", "", w) for w in words)
-            parts = [p for p in [author, year, title_part] if p]
-            return "_".join(parts)
-
-        # Fallback: sanitize identifier
-        safe = re.sub(r"[^\w.-]", "_", identifier)
-        return safe
+        return make_paper_filename(paper, identifier)

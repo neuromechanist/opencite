@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import httpx
+
 from opencite.clients.id_converter import IDConverterClient
 from opencite.clients.pmc import PMCClient
+from opencite.exceptions import OpenCiteError
 from opencite.models import IDType, Paper, parse_identifier
 from opencite.pmc_convert import bioc_to_markdown, extract_figure_files
 
@@ -28,8 +30,8 @@ class FullTextRetriever:
     Retrieval flow:
     1. Resolve PMCID (from paper metadata or ID converter)
     2. Fetch structured text via BioC API
-    3. Convert BioC passages to markdown
-    4. Optionally download figure images
+    3. Optionally download figure images
+    4. Convert BioC passages to markdown
     5. Write markdown to output file
     """
 
@@ -144,7 +146,7 @@ class FullTextRetriever:
             for ids in id_sets:
                 if ids.pmcid:
                     return ids.pmcid
-        except Exception as e:
+        except (OpenCiteError, httpx.HTTPError, ValueError) as e:
             logger.debug("ID conversion failed for %s: %s", identifier, e)
 
         return None
@@ -165,18 +167,6 @@ class FullTextRetriever:
 
     def _make_filename(self, paper: Paper | None, identifier: str) -> str:
         """Generate a filename from paper metadata."""
-        if paper and paper.title:
-            author = ""
-            if paper.authors:
-                a = paper.authors[0]
-                author = a.family_name or a.name.split(",")[0].strip()
-                author = re.sub(r"[^\w]", "", author)
+        from opencite.utils import make_paper_filename
 
-            year = paper.year_str
-            words = paper.title.split()[:3]
-            title_part = "_".join(re.sub(r"[^\w]", "", w) for w in words)
-            parts = [p for p in [author, year, title_part] if p]
-            return "_".join(parts)
-
-        safe = re.sub(r"[^\w.-]", "_", identifier)
-        return safe
+        return make_paper_filename(paper, identifier)

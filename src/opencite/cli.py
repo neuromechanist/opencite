@@ -448,7 +448,9 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
     else:
         output_dir = output_val
 
-    # When --convert is used and --no-fulltext is not set, try PMC full-text first
+    # When --convert is used and --no-fulltext is not set, try PMC full-text
+    # first then fall back to PDF download + convert (all handled inside
+    # retrieve_as_markdown).
     if args.convert and not args.no_fulltext:
         async with PDFRetriever(config) as retriever:
             md_path = await retriever.retrieve_as_markdown(
@@ -461,8 +463,10 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
         if md_path:
             print(f"Retrieved: {md_path}", file=sys.stderr)
             return 0
-        # If full text not available, fall through to PDF download
+        print("Could not retrieve full text or PDF.", file=sys.stderr)
+        return 1
 
+    # PDF-only download (no conversion, or --no-fulltext with conversion)
     async with PDFRetriever(config) as retriever:
         path = await retriever.download(
             identifier=args.id,
@@ -574,14 +578,16 @@ async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
     )
 
     # Print summary
+    total_ok = result.downloaded + result.fulltext_retrieved
     print(
-        f"\nDone: {result.downloaded}/{result.total} downloaded",
+        f"\nDone: {total_ok}/{result.total} retrieved",
         file=sys.stderr,
         end="",
     )
     if result.fulltext_retrieved:
         print(
-            f" ({result.fulltext_retrieved} via PMC full text)",
+            f" ({result.fulltext_retrieved} via PMC full text,"
+            f" {result.downloaded} via PDF)",
             file=sys.stderr,
             end="",
         )

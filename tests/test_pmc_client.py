@@ -13,7 +13,10 @@ class TestNormalizePmcid:
         assert PMCClient._normalize_pmcid("5334499") == "PMC5334499"
 
     def test_lowercase_prefix(self):
-        assert PMCClient._normalize_pmcid("pmc5334499") == "pmc5334499"
+        assert PMCClient._normalize_pmcid("pmc5334499") == "PMC5334499"
+
+    def test_mixed_case_prefix(self):
+        assert PMCClient._normalize_pmcid("Pmc5334499") == "PMC5334499"
 
     def test_with_whitespace(self):
         assert PMCClient._normalize_pmcid("  PMC5334499  ") == "PMC5334499"

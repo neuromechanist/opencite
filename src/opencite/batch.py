@@ -14,6 +14,7 @@ from opencite.pdf import PDFRetriever
 
 if TYPE_CHECKING:
     from opencite.config import Config
+    from opencite.fulltext import FullTextRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class BatchResult:
     total: int = 0
     downloaded: int = 0
     converted: int = 0
+    fulltext_retrieved: int = 0
     failed: list[tuple[str, str]] = field(default_factory=list)
     conversion_failed: list[tuple[str, str]] = field(default_factory=list)
 
@@ -33,6 +35,7 @@ class BatchResult:
             "total": self.total,
             "downloaded": self.downloaded,
             "converted": self.converted,
+            "fulltext_retrieved": self.fulltext_retrieved,
             "failed": [{"id": id_, "reason": reason} for id_, reason in self.failed],
             "conversion_failed": [
                 {"id": id_, "reason": reason} for id_, reason in self.conversion_failed
@@ -131,8 +134,13 @@ async def batch_download(
     convert: bool = False,
     converter: str = "auto",
     concurrency: int = 3,
+    prefer_fulltext: bool = True,
 ) -> BatchResult:
     """Download PDFs for multiple papers with controlled concurrency.
+
+    When convert=True and prefer_fulltext=True, tries PMC full-text
+    retrieval first (bypassing PDF entirely). Falls back to PDF download
+    + conversion if full text is not available.
 
     Args:
         ids: List of DOIs or other identifiers.
@@ -141,6 +149,7 @@ async def batch_download(
         convert: Whether to also convert to markdown.
         converter: Converter to use for markdown conversion.
         concurrency: Max concurrent downloads.
+        prefer_fulltext: Try PMC full-text before PDF when converting.
 
     Returns:
         BatchResult with summary statistics.
@@ -166,9 +175,34 @@ async def batch_download(
                 "Using markitdown; images will not be extracted."
             )
 
-    async def _process_one(identifier: str, retriever: PDFRetriever) -> None:
+    async def _try_fulltext(
+        identifier: str, ft_retriever: FullTextRetriever
+    ) -> Path | None:
+        """Try PMC full-text retrieval (returns markdown path or None)."""
+        return await ft_retriever.retrieve(
+            identifier=identifier,
+            output_dir=str(md_dir),
+            extract_images=True,
+        )
+
+    async def _process_one(
+        identifier: str, retriever: PDFRetriever, ft_retriever: FullTextRetriever | None
+    ) -> None:
         async with semaphore:
             try:
+                # When converting, try PMC full-text first
+                if convert and prefer_fulltext and md_dir is not None and ft_retriever:
+                    md_path = await _try_fulltext(identifier, ft_retriever)
+                    if md_path:
+                        result.fulltext_retrieved += 1
+                        result.converted += 1
+                        print(
+                            f"  OK (fulltext): {identifier} -> {md_path.name}",
+                            file=sys.stderr,
+                        )
+                        return
+
+                # PDF-only download (or fulltext failed/disabled)
                 path = await retriever.download(
                     identifier=identifier,
                     output_dir=str(pdf_dir),
@@ -217,8 +251,22 @@ async def batch_download(
                 result.failed.append((identifier, str(e)))
                 print(f"  FAIL: {identifier} ({e})", file=sys.stderr)
 
-    async with PDFRetriever(config) as retriever:
-        tasks = [asyncio.create_task(_process_one(id_, retriever)) for id_ in ids]
-        await asyncio.gather(*tasks)
+    ft_instance: FullTextRetriever | None = None
+    if convert and prefer_fulltext:
+        from opencite.fulltext import FullTextRetriever as _FTR
+
+        ft_instance = _FTR(config)
+        await ft_instance.__aenter__()
+
+    try:
+        async with PDFRetriever(config) as retriever:
+            tasks = [
+                asyncio.create_task(_process_one(id_, retriever, ft_instance))
+                for id_ in ids
+            ]
+            await asyncio.gather(*tasks)
+    finally:
+        if ft_instance is not None:
+            await ft_instance.__aexit__()
 
     return result

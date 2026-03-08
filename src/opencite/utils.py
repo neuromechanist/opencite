@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from opencite.models import Author
+from opencite.models import Author, Paper
 
 
 def normalize_title(title: str) -> set[str]:
@@ -65,3 +65,22 @@ def reconstruct_abstract(inverted_index: dict | None) -> str:
         for pos in positions:
             words[pos] = word
     return " ".join(w for w in words if w)
+
+
+def make_paper_filename(paper: Paper | None, identifier: str) -> str:
+    """Generate a filename stem from paper metadata or identifier."""
+    if paper and paper.title:
+        author = ""
+        if paper.authors:
+            a = paper.authors[0]
+            author = a.family_name or a.name.split(",")[0].strip()
+            author = re.sub(r"[^\w]", "", author)
+
+        year = paper.year_str
+        words = paper.title.split()[:3]
+        title_part = "_".join(re.sub(r"[^\w]", "", w) for w in words)
+        parts = [p for p in [author, year, title_part] if p]
+        return "_".join(parts)
+
+    safe = re.sub(r"[^\w.-]", "_", identifier)
+    return safe

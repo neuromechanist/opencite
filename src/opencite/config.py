@@ -31,6 +31,7 @@ semantic_scholar = ""
 pubmed = ""
 openalex = ""
 mistral = ""
+# core = ""  # CORE API key (free at https://core.ac.uk/services/api)
 
 [publishers]
 # elsevier = ""
@@ -58,6 +59,7 @@ _TOML_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("api_keys", "pubmed"): ("pubmed_api_key", "PUBMED_API_KEY"),
     ("api_keys", "openalex"): ("openalex_api_key", "OPENALEX_API_KEY"),
     ("api_keys", "mistral"): ("mistral_api_key", "MISTRAL_API_KEY"),
+    ("api_keys", "core"): ("core_api_key", "CORE_API_KEY"),
     ("publishers", "elsevier"): ("elsevier_api_key", "OPENCITE_ELSEVIER_KEY"),
     ("publishers", "wiley_tdm"): ("wiley_tdm_token", "OPENCITE_WILEY_TDM_TOKEN"),
     ("publishers", "springer"): ("springer_api_key", "OPENCITE_SPRINGER_KEY"),
@@ -157,6 +159,9 @@ class Config:
     openalex_api_key: str = ""
     mistral_api_key: str = ""
 
+    # Additional source keys
+    core_api_key: str = ""
+
     # Publisher tokens
     elsevier_api_key: str = ""
     wiley_tdm_token: str = ""
@@ -168,6 +173,9 @@ class Config:
     pubmed_rate_limit: float = 10.0
     arxiv_rate_limit: float = 3.0
     biorxiv_rate_limit: float = 10.0
+    crossref_rate_limit: float = 50.0
+    core_rate_limit: float = 0.5
+    unpaywall_rate_limit: float = 10.0
 
     # Request settings
     timeout: float = 30.0

@@ -30,7 +30,7 @@ def create_parser() -> argparse.ArgumentParser:
     search_p.add_argument("query", help="search query string")
     search_p.add_argument(
         "--source",
-        choices=["openalex", "s2", "pubmed", "all"],
+        choices=["openalex", "s2", "pubmed", "arxiv", "biorxiv", "crossref", "core", "all"],
         default="all",
         help="search source (default: all)",
     )

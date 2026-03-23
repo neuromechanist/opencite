@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 from opencite.clients.id_converter import IDConverterClient
+from opencite.clients.unpaywall import UnpaywallClient
 from opencite.models import IDType, Paper, parse_identifier
 
 if TYPE_CHECKING:
@@ -42,6 +43,38 @@ _PUBLISHER_MAP: dict[str, tuple[str, str, str]] = {
     ),
 }
 
+# Known DOI prefixes and their publishers -- used for informational hints
+# when PDF retrieval fails, to guide users toward the right access method.
+# Sources: CrossRef prefix registry.
+PUBLISHER_INFO: dict[str, str] = {
+    # Publishers with authenticated API access (see _PUBLISHER_MAP above)
+    "10.1016": "Elsevier/ScienceDirect (set elsevier_api_key for TDM access)",
+    "10.1002": "Wiley (set wiley_tdm_token for TDM access)",
+    "10.1007": "Springer (set springer_api_key for OA access)",
+    "10.1038": "Springer Nature (set springer_api_key for OA access)",
+    # Major publishers without direct API -- rely on Unpaywall, OA repos, or DOI
+    "10.1109": "IEEE (PDFs often via Unpaywall or institutional access)",
+    "10.1145": "ACM (PDFs often via Unpaywall or ACM Open TOC)",
+    "10.1126": "Science/AAAS (PDFs via Unpaywall or institutional access)",
+    "10.1093": "Oxford University Press (check Unpaywall for OA copies)",
+    "10.1080": "Taylor & Francis (check Unpaywall for OA copies)",
+    "10.1177": "SAGE Publications (check Unpaywall for OA copies)",
+    "10.1371": "PLOS (open access -- should always have free PDF)",
+    "10.3389": "Frontiers (open access -- should always have free PDF)",
+    "10.7554": "eLife (open access -- should always have free PDF)",
+    "10.1523": "J. Neuroscience (check Unpaywall, many are OA after embargo)",
+    "10.1101": "bioRxiv/medRxiv (always open access)",
+    "10.48550": "arXiv (always open access)",
+    "10.1136": "BMJ (check Unpaywall for OA copies)",
+    "10.1001": "JAMA Network (check Unpaywall for OA copies)",
+    "10.1056": "NEJM (check Unpaywall for OA copies)",
+    "10.1161": "AHA Journals (check Unpaywall for OA copies)",
+    "10.1073": "PNAS (OA after 6 months, check Unpaywall)",
+    "10.1172": "JCI (open access)",
+    "10.1242": "Company of Biologists (check Unpaywall for OA copies)",
+    "10.1113": "J. Physiology (check Unpaywall for OA copies)",
+}
+
 
 class PDFRetriever:
     """Download PDFs for academic papers.
@@ -60,13 +93,16 @@ class PDFRetriever:
     def __init__(self, config: Config):
         self.config = config
         self._id_converter = IDConverterClient(config)
+        self._unpaywall = UnpaywallClient(config)
 
     async def __aenter__(self) -> PDFRetriever:
         await self._id_converter.__aenter__()
+        await self._unpaywall.__aenter__()
         return self
 
     async def __aexit__(self, *args: object) -> None:
         await self._id_converter.__aexit__()
+        await self._unpaywall.__aexit__()
 
     async def download(
         self,
@@ -105,7 +141,7 @@ class PDFRetriever:
         if paper is None:
             paper = await self._quick_lookup(identifier)
 
-        urls = self._collect_urls(paper, identifier)
+        urls = await self._collect_urls(paper, identifier)
 
         if not urls:
             logger.warning("No PDF URLs found for %s", identifier)
@@ -130,7 +166,7 @@ class PDFRetriever:
         async with SearchOrchestrator(self.config) as searcher:
             return await searcher.lookup(identifier, enrich=False)
 
-    def _collect_urls(self, paper: Paper | None, identifier: str) -> list[str]:
+    async def _collect_urls(self, paper: Paper | None, identifier: str) -> list[str]:
         """Collect candidate PDF URLs in priority order."""
         urls: list[str] = []
 
@@ -167,7 +203,17 @@ class PDFRetriever:
                 if pmc_url not in urls:
                     urls.append(pmc_url)
 
-        # Priority 4a: Direct bioRxiv/medRxiv PDF for 10.1101/ DOIs
+        # Priority 4: Unpaywall -- finds OA copies across 50k+ repositories
+        if doi:
+            try:
+                unpaywall_locs = await self._unpaywall.lookup_doi(doi)
+                for loc in unpaywall_locs:
+                    if loc.url and loc.url not in urls:
+                        urls.append(loc.url)
+            except Exception as e:
+                logger.debug("Unpaywall lookup failed for %s: %s", doi, e)
+
+        # Priority 5a: Direct bioRxiv/medRxiv PDF for 10.1101/ DOIs
         if doi and doi.startswith("10.1101/"):
             preprint_server = "biorxiv"
             if paper and (
@@ -179,7 +225,7 @@ class PDFRetriever:
             if preprint_pdf not in urls:
                 urls.append(preprint_pdf)
 
-        # Priority 4b: DOI content negotiation
+        # Priority 5b: DOI content negotiation
         if doi:
             doi_url = f"https://doi.org/{doi}"
             if doi_url not in urls:
@@ -267,7 +313,13 @@ class PDFRetriever:
         failures: list[tuple[str, str]],
         paper: Paper | None,
     ) -> None:
-        """Report detailed failure summary."""
+        """Report detailed failure summary.
+
+        Uses print() to stderr for user-visible messages so failures
+        are always reported regardless of log level (fixes #21).
+        """
+        import sys
+
         if not failures:
             logger.warning("All PDF download attempts failed for %s", identifier)
             return
@@ -279,14 +331,13 @@ class PDFRetriever:
             summary_parts.append(f"  {short}: {reason}")
 
         summary = "\n".join(summary_parts)
-        logger.warning(
-            "PDF download failed for %s. Tried %d source(s):\n%s",
-            identifier,
-            len(failures),
-            summary,
+        print(
+            f"PDF download failed for {identifier}. "
+            f"Tried {len(failures)} source(s):\n{summary}",
+            file=sys.stderr,
         )
 
-        # Suggest institutional access
+        # Suggest institutional access and Unpaywall
         doi = paper.doi if paper else None
         if not doi:
             try:
@@ -297,10 +348,28 @@ class PDFRetriever:
                 pass
 
         if doi:
-            logger.info(
-                "Paper may be available via institutional access: https://doi.org/%s",
-                doi,
-            )
+            hints = [f"  Institutional access: https://doi.org/{doi}"]
+            if not self.config.contact_email:
+                hints.append(
+                    "  Tip: Set contact_email in config to enable Unpaywall "
+                    "(finds OA copies from 50k+ repositories)"
+                )
+            # Check for unconfigured publisher tokens
+            prefix = doi.split("/")[0] if "/" in doi else ""
+            pub_info = _PUBLISHER_MAP.get(prefix)
+            if pub_info:
+                name, _url, config_key = pub_info
+                if not getattr(self.config, config_key, ""):
+                    hints.append(
+                        f"  Tip: Set {config_key} in config for authenticated "
+                        f"{name} downloads"
+                    )
+            # Show publisher-specific guidance
+            publisher_hint = PUBLISHER_INFO.get(prefix)
+            if publisher_hint:
+                hints.append(f"  Publisher: {publisher_hint}")
+            if hints:
+                print("\n".join(hints), file=sys.stderr)
 
     async def retrieve_as_markdown(
         self,

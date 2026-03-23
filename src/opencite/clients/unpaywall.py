@@ -35,7 +35,7 @@ class UnpaywallClient(BaseClient):
         super().__init__(
             config=config,
             base_url=BASE_URL,
-            rate_limit=10.0,  # conservative; daily cap is 100k
+            rate_limit=config.unpaywall_rate_limit,
             burst=5,
         )
 
@@ -88,8 +88,9 @@ def _extract_locations(data: dict[str, Any]) -> list[PDFLocation]:
 
 def _parse_location(loc: dict[str, Any]) -> PDFLocation | None:
     """Parse a single Unpaywall OA location into a PDFLocation."""
-    # Prefer url_for_pdf, fall back to url_for_landing_page
-    url = loc.get("url_for_pdf") or ""
+    # Prefer url_for_pdf, fall back to url_for_landing_page (which may
+    # redirect to a PDF or at least provide OA access)
+    url = loc.get("url_for_pdf") or loc.get("url_for_landing_page") or ""
     if not url:
         return None
 

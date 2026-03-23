@@ -321,7 +321,10 @@ class PDFRetriever:
         import sys
 
         if not failures:
-            logger.warning("All PDF download attempts failed for %s", identifier)
+            print(
+                f"PDF download failed for {identifier}: no sources attempted.",
+                file=sys.stderr,
+            )
             return
 
         summary_parts = []

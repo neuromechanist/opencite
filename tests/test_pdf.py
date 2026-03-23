@@ -211,13 +211,11 @@ class TestReportFailures:
         retriever.config = Config()
         return retriever
 
-    def test_empty_failures(self, caplog):
-        import logging
-
+    def test_empty_failures(self, capsys):
         retriever = self._make_retriever()
-        with caplog.at_level(logging.WARNING):
-            retriever._report_failures("10.1234/test", [], None)
-        assert "All PDF download attempts failed" in caplog.text
+        retriever._report_failures("10.1234/test", [], None)
+        captured = capsys.readouterr()
+        assert "no sources attempted" in captured.err
 
     def test_failures_with_reasons(self, capsys):
         retriever = self._make_retriever()

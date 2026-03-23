@@ -44,9 +44,11 @@ def test_extract_locations_deduplicates():
     locs = _extract_locations(SAMPLE_RESPONSE)
     urls = [loc.url for loc in locs]
 
-    assert len(locs) == 2  # 3rd has no PDF URL, 1st is deduped with best_oa
+    # 3rd location falls back to landing page URL, 1st is deduped with best_oa
+    assert len(locs) == 3
     assert urls[0] == "https://europepmc.org/articles/pmc6671580?pdf=render"
     assert urls[1] == "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6671580/pdf/"
+    assert urls[2] == "https://doi.org/10.1523/jneurosci.3300-07.2008"
 
 
 def test_extract_locations_all_oa():
@@ -70,14 +72,21 @@ def test_parse_location_with_pdf_url():
     assert loc.license == "cc-by-nc"
 
 
-def test_parse_location_no_pdf_url():
-    """Locations without pdf URL should return None."""
+def test_parse_location_no_pdf_url_falls_back_to_landing():
+    """Locations without pdf URL should fall back to landing page."""
     loc = _parse_location(
         {
             "url_for_pdf": None,
             "url_for_landing_page": "https://example.com/",
         }
     )
+    assert loc is not None
+    assert loc.url == "https://example.com/"
+
+
+def test_parse_location_no_urls_at_all():
+    """Locations with neither pdf URL nor landing page return None."""
+    loc = _parse_location({"url_for_pdf": None, "url_for_landing_page": None})
     assert loc is None
 
 

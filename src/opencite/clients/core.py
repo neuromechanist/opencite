@@ -36,7 +36,7 @@ class COREClient(BaseClient):
         super().__init__(
             config=config,
             base_url=BASE_URL,
-            rate_limit=0.5,  # 5 req per 10 seconds
+            rate_limit=config.core_rate_limit,
             burst=2,
         )
 

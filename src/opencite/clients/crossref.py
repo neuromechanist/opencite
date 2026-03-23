@@ -39,7 +39,7 @@ class CrossRefClient(BaseClient):
         super().__init__(
             config=config,
             base_url=BASE_URL,
-            rate_limit=50.0,  # polite pool allows ~50/sec
+            rate_limit=config.crossref_rate_limit,
             burst=10,
         )
 

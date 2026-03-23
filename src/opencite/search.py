@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from opencite.clients.arxiv import ArXivClient
 from opencite.clients.biorxiv import BioRxivClient
+from opencite.clients.core import COREClient
+from opencite.clients.crossref import CrossRefClient
 from opencite.clients.openalex import OpenAlexClient
 from opencite.clients.pubmed import PubMedClient
 from opencite.clients.semantic_scholar import SemanticScholarClient
@@ -19,7 +21,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ALL_SOURCES = ("openalex", "s2", "pubmed", "arxiv", "biorxiv")
+ALL_SOURCES = ("openalex", "s2", "pubmed", "arxiv", "biorxiv", "crossref", "core")
 
 
 class SearchOrchestrator:
@@ -40,6 +42,8 @@ class SearchOrchestrator:
         self._pubmed = PubMedClient(config)
         self._arxiv = ArXivClient(config)
         self._biorxiv = BioRxivClient(config)
+        self._crossref = CrossRefClient(config)
+        self._core = COREClient(config)
 
     async def __aenter__(self) -> SearchOrchestrator:
         await self._openalex.__aenter__()
@@ -47,6 +51,8 @@ class SearchOrchestrator:
         await self._pubmed.__aenter__()
         await self._arxiv.__aenter__()
         await self._biorxiv.__aenter__()
+        await self._crossref.__aenter__()
+        await self._core.__aenter__()
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -55,6 +61,8 @@ class SearchOrchestrator:
         await self._pubmed.__aexit__()
         await self._arxiv.__aexit__()
         await self._biorxiv.__aexit__()
+        await self._crossref.__aexit__()
+        await self._core.__aexit__()
 
     async def search(
         self,
@@ -95,6 +103,12 @@ class SearchOrchestrator:
             tasks["biorxiv"] = asyncio.create_task(
                 self._search_biorxiv(query, max_results)
             )
+        if "crossref" in sources:
+            tasks["crossref"] = asyncio.create_task(
+                self._search_crossref(query, max_results, year_from, year_to)
+            )
+        if "core" in sources:
+            tasks["core"] = asyncio.create_task(self._search_core(query, max_results))
 
         all_papers: list[Paper] = []
         source_counts: dict[str, int] = {}
@@ -200,13 +214,29 @@ class SearchOrchestrator:
     async def _search_biorxiv(self, query: str, max_results: int) -> list[Paper]:
         return await self._biorxiv.search(query, max_results=max_results)
 
+    async def _search_crossref(
+        self,
+        query: str,
+        max_results: int,
+        year_from: int | None,
+        year_to: int | None,
+    ) -> list[Paper]:
+        return await self._crossref.search(
+            query, max_results=max_results, year_from=year_from, year_to=year_to
+        )
+
+    async def _search_core(self, query: str, max_results: int) -> list[Paper]:
+        return await self._core.search(query, max_results=max_results)
+
     async def _lookup_by_type(self, id_type: IDType, id_value: str) -> Paper | None:
         """Look up paper using the most appropriate API for the ID type."""
         if id_type == IDType.DOI:
-            # Try S2 first (fast), fall back to OpenAlex
+            # Try S2 first (fast), fall back to OpenAlex, then CrossRef
             paper = await self._s2.lookup(f"DOI:{id_value}")
             if not paper:
                 paper = await self._openalex.lookup_doi(id_value)
+            if not paper:
+                paper = await self._crossref.lookup_doi(id_value)
             return paper
 
         if id_type == IDType.PMID:

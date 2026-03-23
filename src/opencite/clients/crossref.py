@@ -12,7 +12,9 @@ This client provides:
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
 from opencite.clients.base import BaseClient
@@ -75,11 +77,11 @@ class CrossRefClient(BaseClient):
 
         try:
             resp = await self.get("/works", params=params)
+            data = resp.json()
         except Exception as e:
             logger.warning("CrossRef search failed: %s", e)
             return []
 
-        data = resp.json()
         items = data.get("message", {}).get("items", [])
         return [p for item in items if (p := _parse_work(item)) is not None]
 
@@ -87,11 +89,11 @@ class CrossRefClient(BaseClient):
         """Look up a single work by DOI."""
         try:
             resp = await self.get(f"/works/{doi}")
+            data = resp.json()
         except Exception as e:
             logger.debug("CrossRef lookup failed for %s: %s", doi, e)
             return None
 
-        data = resp.json()
         work = data.get("message", {})
         return _parse_work(work)
 
@@ -110,7 +112,8 @@ def _parse_work(work: dict[str, Any]) -> Paper | None:
     for date_field in ("published-print", "published-online"):
         parts = work.get(date_field, {}).get("date-parts", [[]])
         if parts and parts[0] and parts[0][0]:
-            year = parts[0][0]
+            with contextlib.suppress(TypeError, ValueError):
+                year = int(parts[0][0])
             break
 
     # Publication date string
@@ -154,8 +157,6 @@ def _parse_work(work: dict[str, Any]) -> Paper | None:
     # Abstract (CrossRef provides JATS XML; strip tags)
     abstract = work.get("abstract", "")
     if abstract:
-        import re
-
         abstract = re.sub(r"<[^>]+>", "", abstract).strip()[:1000]
 
     # PDF locations from link records

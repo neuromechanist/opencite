@@ -10,6 +10,7 @@ The free tier allows 1 batch request or 5 single requests per 10 seconds.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -63,11 +64,11 @@ class COREClient(BaseClient):
 
         try:
             resp = await self.get("/v3/search/works", params=params)
+            data = resp.json()
         except Exception as e:
             logger.warning("CORE search failed: %s", e)
             return []
 
-        data = resp.json()
         results = data.get("results", [])
         return [p for item in results if (p := _parse_work(item)) is not None]
 
@@ -80,11 +81,11 @@ class COREClient(BaseClient):
             resp = await self.get(
                 "/v3/search/works", params={"q": f'doi:"{doi}"', "limit": 1}
             )
+            data = resp.json()
         except Exception as e:
             logger.debug("CORE lookup failed for %s: %s", doi, e)
             return None
 
-        data = resp.json()
         results = data.get("results", [])
         if not results:
             return None
@@ -105,6 +106,12 @@ def _parse_work(work: dict[str, Any]) -> Paper | None:
         doi = doi[len("http://doi.org/") :]
 
     year = work.get("yearPublished")
+
+    # Publication date
+    pub_date = work.get("publishedDate") or work.get("depositedDate") or ""
+    if pub_date and not year:
+        with contextlib.suppress(ValueError, IndexError):
+            year = int(pub_date[:4])
 
     # Authors
     authors = []
@@ -152,6 +159,7 @@ def _parse_work(work: dict[str, Any]) -> Paper | None:
         authors=authors,
         year=year,
         source_venue=source_venue,
+        publication_date=pub_date,
         abstract=abstract,
         pdf_locations=pdf_locations,
         is_oa=True,

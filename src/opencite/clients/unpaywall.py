@@ -55,11 +55,11 @@ class UnpaywallClient(BaseClient):
 
         try:
             resp = await self.get(f"/v2/{doi}", params={"email": email})
+            data = resp.json()
         except Exception as e:
             logger.debug("Unpaywall lookup failed for %s: %s", doi, e)
             return []
 
-        data = resp.json()
         return _extract_locations(data)
 
 

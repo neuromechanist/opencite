@@ -24,18 +24,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def html_to_markdown(html: str) -> str | None:
+def html_to_markdown(html: str, context: str = "") -> str | None:
     """Convert an HTML document to markdown using markitdown.
 
     markitdown is the same library used by the PDF pipeline (`convert.py`),
     so output style is consistent across full-text routes. Returns None on
     conversion failure.
+
+    Args:
+        html: The HTML body to convert.
+        context: Identifier (DOI, arXiv ID, or "scheme:value") included in
+            warning messages so failures are traceable to a specific paper.
     """
+    ctx = f" [{context}]" if context else ""
     try:
         from markitdown import MarkItDown
     except ImportError:
         logger.warning(
-            "markitdown is required for HTML-to-markdown conversion but is not installed"
+            "markitdown is required for HTML-to-markdown conversion but is not installed%s",
+            ctx,
         )
         return None
 
@@ -47,7 +54,7 @@ def html_to_markdown(html: str) -> str | None:
         )
         return result.text_content
     except (OSError, ValueError, RuntimeError) as e:
-        logger.warning("HTML-to-markdown conversion failed: %s", e)
+        logger.warning("HTML-to-markdown conversion failed%s: %s", ctx, e)
         return None
 
 

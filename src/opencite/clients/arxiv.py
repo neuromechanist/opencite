@@ -148,7 +148,7 @@ class ArXivClient(PreprintClient):
             logger.warning("ar5iv returned HTTP %d for %s", resp.status_code, arxiv_id)
             return None
 
-        return html_to_markdown(resp.text)
+        return html_to_markdown(resp.text, context=f"arxiv:{arxiv_id}")
 
     @staticmethod
     def _derive_arxiv_id(paper: Paper) -> str:

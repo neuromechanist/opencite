@@ -56,13 +56,30 @@ class PreprintFullTextRetriever:
         self._by_name: dict[str, PreprintClient] = {c.name: c for c in self._clients}
 
     async def __aenter__(self) -> PreprintFullTextRetriever:
-        for client in self._clients:
-            await client.__aenter__()
+        entered: list[PreprintClient] = []
+        try:
+            for client in self._clients:
+                await client.__aenter__()
+                entered.append(client)
+        except Exception:
+            # Roll back the partial enter so we don't leak open httpx clients
+            # for the subset that successfully opened.
+            for c in reversed(entered):
+                try:
+                    await c.__aexit__()
+                except Exception:
+                    logger.warning(
+                        "Failed to roll back %s during retriever init", c.name
+                    )
+            raise
         return self
 
     async def __aexit__(self, *args: object) -> None:
         for client in self._clients:
-            await client.__aexit__(*args)
+            try:
+                await client.__aexit__(*args)
+            except Exception:
+                logger.warning("Error closing preprint client %s", client.name)
 
     def _pick_client(self, paper: Paper) -> PreprintClient | None:
         """Return the preprint client that can serve *paper*, or None."""
@@ -72,7 +89,14 @@ class PreprintFullTextRetriever:
             if client is not None:
                 return client
 
-        # 2. DOI-prefix routing.
+        # 2. arXiv ID -> arXiv client (covers bare arXiv IDs and ``arxiv:`` URLs
+        #    where no DOI is on the paper yet).
+        if paper.ids.arxiv_id:
+            client = self._by_name.get("arxiv")
+            if client is not None:
+                return client
+
+        # 3. DOI-prefix routing.
         doi = (paper.doi or "").strip().lower()
         if not doi:
             return None
@@ -108,16 +132,36 @@ class PreprintFullTextRetriever:
             Path to the written markdown file, or None when no preprint
             route applies / fetch fails / conversion fails.
         """
+        ident_for_log = identifier or paper.doi or paper.ids.arxiv_id or "<unknown>"
+
         client = self._pick_client(paper)
         if client is None:
+            logger.debug(
+                "no preprint client for %s (doi=%s, arxiv_id=%s, sources=%s)",
+                ident_for_log,
+                paper.doi,
+                paper.ids.arxiv_id,
+                paper.data_sources,
+            )
             return None
 
         route = client.fulltext_route(paper)
         if route in (FulltextRoute.NONE, FulltextRoute.PDF):
+            logger.debug(
+                "preprint route %s for %s via %s -> skip",
+                route,
+                ident_for_log,
+                client.name,
+            )
             return None
 
         md_text = await client.fetch_fulltext(paper)
         if not md_text:
+            logger.debug(
+                "preprint fetch returned empty markdown for %s via %s",
+                ident_for_log,
+                client.name,
+            )
             return None
 
         out_dir = Path(output_dir)
@@ -137,24 +181,44 @@ class PreprintFullTextRetriever:
         )
         return md_path
 
-    async def retrieve_for_doi(
+    async def retrieve_for_identifier(
         self,
-        doi: str,
+        identifier: str,
         output_dir: str | Path = ".",
         filename: str | None = None,
     ) -> Path | None:
-        """DOI-only entry point: looks up the paper, then retrieves full text.
+        """Identifier-only entry point: parses the identifier, retrieves full text.
 
-        Used by `batch.py` and the `pdf` CLI subcommand when only an
-        identifier is available.
+        Accepts any identifier `parse_identifier` understands -- bare DOIs,
+        ``arxiv:XXXX.YYYYY``, ``pmid:XXXXX``, full URLs to arXiv/bioRxiv, etc.
+        Maps it to the right `IDSet` field so `_pick_client` can route by
+        either ``arxiv_id`` or ``doi``. Used by `batch.py` and the `pdf` CLI
+        subcommand when only a free-form identifier is available.
         """
-        from opencite.models import IDSet
+        from opencite.models import IDSet, IDType, parse_identifier
         from opencite.models import Paper as PaperModel
 
-        paper = PaperModel(title="", ids=IDSet(doi=doi))
+        ids: IDSet
+        try:
+            id_type, id_value = parse_identifier(identifier)
+        except ValueError:
+            ids = IDSet(doi=identifier)
+        else:
+            if id_type == IDType.ARXIV:
+                ids = IDSet(arxiv_id=id_value)
+            elif id_type == IDType.DOI:
+                ids = IDSet(doi=id_value)
+            elif id_type == IDType.PMID:
+                ids = IDSet(pmid=id_value)
+            elif id_type == IDType.PMCID:
+                ids = IDSet(pmcid=id_value)
+            else:
+                ids = IDSet(doi=identifier)
+
+        paper = PaperModel(title="", ids=ids)
         return await self.retrieve(
             paper,
             output_dir=output_dir,
-            identifier=doi,
+            identifier=identifier,
             filename=filename,
         )

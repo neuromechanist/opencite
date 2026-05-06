@@ -68,11 +68,17 @@ class _BiorxivLikePreprintClient(PreprintClient):
 
     async def __aenter__(self) -> _BiorxivLikePreprintClient:
         await super().__aenter__()
-        self._crossref_client = httpx.AsyncClient(
-            base_url=_CROSSREF_BASE,
-            timeout=self.timeout,
-            headers=self._default_headers(),
-        )
+        try:
+            self._crossref_client = httpx.AsyncClient(
+                base_url=_CROSSREF_BASE,
+                timeout=self.timeout,
+                headers=self._default_headers(),
+            )
+        except Exception:
+            # The parent's session was opened above; close it before
+            # propagating so we don't leak the underlying httpx client.
+            await super().__aexit__()
+            raise
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -233,7 +239,7 @@ class _BiorxivLikePreprintClient(PreprintClient):
             )
             return None
 
-        return html_to_markdown(resp.text)
+        return html_to_markdown(resp.text, context=f"{self.server}:{doi}")
 
     # ------------------------------------------------------------------
     # Parsing helpers

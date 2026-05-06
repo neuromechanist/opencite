@@ -196,7 +196,7 @@ async def batch_download(
         pre_retriever: PreprintFullTextRetriever,
     ) -> Path | None:
         """Try preprint-native HTML retrieval for arXiv/bioRxiv/medRxiv DOIs."""
-        return await pre_retriever.retrieve_for_doi(
+        return await pre_retriever.retrieve_for_identifier(
             identifier,
             output_dir=str(md_dir),
         )

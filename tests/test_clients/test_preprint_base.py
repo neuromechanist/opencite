@@ -7,7 +7,11 @@ import pytest
 from opencite.clients.arxiv import ArXivClient
 from opencite.clients.biorxiv import BioRxivClient
 from opencite.clients.medrxiv import MedRxivClient
-from opencite.clients.preprint_base import FulltextRoute, PreprintClient
+from opencite.clients.preprint_base import (
+    FulltextRoute,
+    PreprintClient,
+    html_to_markdown,
+)
 from opencite.config import Config
 
 
@@ -93,3 +97,31 @@ class TestPreprintClientSubclassEnforcement:
 
             class BadConcreteServerClient(_BiorxivLikePreprintClient):  # type: ignore[misc]
                 name = "bad-without-server"
+
+
+class TestHtmlToMarkdown:
+    """Round-trip and edge-case behavior of the shared HTML helper."""
+
+    def test_basic_html_converts_headings_and_paragraphs(self):
+        html = "<html><body><h1>Title</h1><p>Body text.</p></body></html>"
+        md = html_to_markdown(html)
+        assert md is not None
+        assert "Title" in md
+        assert "Body text" in md
+
+    def test_empty_input_returns_string(self):
+        # markitdown returns an empty body for empty input rather than raising.
+        # Either an empty string or None is acceptable behavior; the helper
+        # must not raise.
+        result = html_to_markdown("")
+        assert result == "" or result is None
+
+    def test_malformed_html_still_returns_text(self):
+        """markitdown is forgiving; broken tags should still yield text."""
+        md = html_to_markdown("<h1>A<unclosed><p>B</body>")
+        assert md is not None
+        assert "A" in md and "B" in md
+
+    def test_context_does_not_change_output(self):
+        html = "<p>Hello.</p>"
+        assert html_to_markdown(html) == html_to_markdown(html, context="x:y")

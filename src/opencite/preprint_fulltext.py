@@ -1,0 +1,160 @@
+"""Preprint full-text retrieval pipeline.
+
+Sits between :class:`opencite.fulltext.FullTextRetriever` (PMC BioC) and the
+PDF download path. For OA preprints, fetches the server-native HTML/JATS
+representation and converts it to markdown so the user does not pay the
+quality and bandwidth cost of a PDF round-trip.
+
+Phase 2 ships the arXiv (ar5iv HTML5) and bioRxiv/medRxiv (`.full` HTML)
+routes; Phase 3 will plug in OSF/PsyArXiv, Zenodo, and Figshare.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from opencite.clients.arxiv import ArXivClient
+from opencite.clients.biorxiv import BioRxivClient
+from opencite.clients.medrxiv import MedRxivClient
+from opencite.clients.preprint_base import FulltextRoute, PreprintClient
+from opencite.utils import make_paper_filename
+
+if TYPE_CHECKING:
+    from opencite.config import Config
+    from opencite.models import Paper
+
+logger = logging.getLogger(__name__)
+
+
+class PreprintFullTextRetriever:
+    """Retrieve preprint full text via the matching `PreprintClient`.
+
+    Picks the right client for a paper using two signals, in order:
+
+    1. ``paper.data_sources`` matches a client's ``name`` (e.g. ``"arxiv"``).
+    2. ``paper.doi`` prefix matches a known preprint DOI prefix
+       (``10.48550/arXiv.`` -> arxiv; ``10.1101/`` -> biorxiv then medrxiv).
+
+    Mirrors the shape of :class:`opencite.fulltext.FullTextRetriever` so
+    callers in `pdf.py` and `batch.py` can chain them with parallel structure.
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        clients: list[PreprintClient] | None = None,
+    ) -> None:
+        self.config = config
+        # Default fan-out covers Phase 1+2 servers. Phase 3 extends this list.
+        self._clients: list[PreprintClient] = clients or [
+            ArXivClient(config),
+            BioRxivClient(config),
+            MedRxivClient(config),
+        ]
+        self._by_name: dict[str, PreprintClient] = {c.name: c for c in self._clients}
+
+    async def __aenter__(self) -> PreprintFullTextRetriever:
+        for client in self._clients:
+            await client.__aenter__()
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        for client in self._clients:
+            await client.__aexit__(*args)
+
+    def _pick_client(self, paper: Paper) -> PreprintClient | None:
+        """Return the preprint client that can serve *paper*, or None."""
+        # 1. Direct attribution on the paper.
+        for src in paper.data_sources:
+            client = self._by_name.get(src)
+            if client is not None:
+                return client
+
+        # 2. DOI-prefix routing.
+        doi = (paper.doi or "").strip().lower()
+        if not doi:
+            return None
+        if doi.startswith("10.48550/arxiv."):
+            return self._by_name.get("arxiv")
+        if doi.startswith("10.1101/"):
+            # bioRxiv first; medRxiv as fallback. Both will return None for
+            # the wrong server, so the orchestrator above us would have to
+            # try multiple. Here we pick ONE client to fetch full text from
+            # and rely on the .full URL succeeding. bioRxiv fronting is fine
+            # because bioRxiv mirrors medRxiv content URLs cross-domain in
+            # practice; if it 404s we return None and the caller falls back
+            # to PDF.
+            return self._by_name.get("biorxiv") or self._by_name.get("medrxiv")
+        return None
+
+    async def retrieve(
+        self,
+        paper: Paper,
+        output_dir: str | Path = ".",
+        identifier: str | None = None,
+        filename: str | None = None,
+    ) -> Path | None:
+        """Fetch full text for *paper* and write markdown to disk.
+
+        Args:
+            paper: The paper to retrieve. Must carry a DOI or arXiv ID.
+            output_dir: Directory for the markdown file (created if missing).
+            identifier: Original CLI identifier, used for filename fallback.
+            filename: Custom base filename (without extension).
+
+        Returns:
+            Path to the written markdown file, or None when no preprint
+            route applies / fetch fails / conversion fails.
+        """
+        client = self._pick_client(paper)
+        if client is None:
+            return None
+
+        route = client.fulltext_route(paper)
+        if route in (FulltextRoute.NONE, FulltextRoute.PDF):
+            return None
+
+        md_text = await client.fetch_fulltext(paper)
+        if not md_text:
+            return None
+
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        ident_for_name = identifier or paper.doi or paper.ids.arxiv_id or ""
+        fname = filename or make_paper_filename(paper, ident_for_name)
+        if not fname.endswith(".md"):
+            fname += ".md"
+        md_path = out_dir / fname
+        md_path.write_text(md_text, encoding="utf-8")
+        logger.info(
+            "Preprint full text written to %s via %s (%s)",
+            md_path,
+            client.name,
+            route,
+        )
+        return md_path
+
+    async def retrieve_for_doi(
+        self,
+        doi: str,
+        output_dir: str | Path = ".",
+        filename: str | None = None,
+    ) -> Path | None:
+        """DOI-only entry point: looks up the paper, then retrieves full text.
+
+        Used by `batch.py` and the `pdf` CLI subcommand when only an
+        identifier is available.
+        """
+        from opencite.models import IDSet
+        from opencite.models import Paper as PaperModel
+
+        paper = PaperModel(title="", ids=IDSet(doi=doi))
+        return await self.retrieve(
+            paper,
+            output_dir=output_dir,
+            identifier=doi,
+            filename=filename,
+        )

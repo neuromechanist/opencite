@@ -47,20 +47,27 @@ class TestPreprintClientABC:
         "cls",
         [ArXivClient, BioRxivClient, MedRxivClient],
     )
-    def test_default_fulltext_route_is_none(self, cls):
-        """Phase 1 ships no preprint-native full-text routes; Phase 2 adds them."""
+    def test_fulltext_route_none_when_no_preprint_signal(self, cls):
+        """Without an arXiv ID or a 10.1101/* DOI, no preprint route applies."""
+        from opencite.models import IDSet, Paper
+
         client = cls(Config())
-        # ``Paper`` argument is unused in the default impl; pass None.
-        assert client.fulltext_route(None) == FulltextRoute.NONE  # type: ignore[arg-type]
+        empty_paper = Paper(title="x", ids=IDSet(doi="10.1038/nature12373"))
+        assert client.fulltext_route(empty_paper) == FulltextRoute.NONE
 
     @pytest.mark.parametrize(
         "cls",
         [ArXivClient, BioRxivClient, MedRxivClient],
     )
     @pytest.mark.asyncio
-    async def test_default_fetch_fulltext_returns_none(self, cls):
+    async def test_fetch_fulltext_none_when_no_preprint_signal(self, cls):
+        """`fetch_fulltext` short-circuits to None before opening any session."""
+        from opencite.models import IDSet, Paper
+
         client = cls(Config())
-        assert await client.fetch_fulltext(None) is None  # type: ignore[arg-type]
+        empty_paper = Paper(title="x", ids=IDSet(doi="10.1038/nature12373"))
+        # No `async with`: short-circuit must fire before any network use.
+        assert await client.fetch_fulltext(empty_paper) is None
 
 
 class TestPreprintClientSubclassEnforcement:

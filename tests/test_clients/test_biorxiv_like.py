@@ -124,3 +124,85 @@ class TestBiorxivLikeLookupDoi:
         assert "medrxiv" in paper.data_sources
         assert medrxiv_route.called
         assert not biorxiv_route.called
+
+
+class TestBiorxivLikeFulltext:
+    """Tests for `.full` HTML full-text route on bioRxiv and medRxiv."""
+
+    def test_fulltext_route_html_for_biorxiv_doi(self, _config: Config):
+        from opencite.clients.preprint_base import FulltextRoute
+        from opencite.models import IDSet, Paper
+
+        client = BioRxivClient(_config)
+        paper = Paper(title="A", ids=IDSet(doi="10.1101/2024.01.01.000001"))
+        assert client.fulltext_route(paper) == FulltextRoute.HTML
+
+    def test_fulltext_route_none_without_biorxiv_doi(self, _config: Config):
+        from opencite.clients.preprint_base import FulltextRoute
+        from opencite.models import IDSet, Paper
+
+        client = BioRxivClient(_config)
+        paper = Paper(title="A", ids=IDSet(doi="10.1038/nature12373"))
+        assert client.fulltext_route(paper) == FulltextRoute.NONE
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_fulltext_biorxiv_full_html(self, _config: Config):
+        from opencite.models import IDSet, Paper
+
+        doi = "10.1101/2024.01.01.000001"
+        respx.get(f"https://www.biorxiv.org/content/{doi}.full").mock(
+            return_value=httpx.Response(
+                200,
+                text=(
+                    "<html><body><h1>A bioRxiv paper</h1><p>Methods.</p></body></html>"
+                ),
+            )
+        )
+        async with BioRxivClient(_config) as client:
+            md = await client.fetch_fulltext(Paper(title="x", ids=IDSet(doi=doi)))
+        assert md is not None
+        assert "bioRxiv paper" in md
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_fulltext_medrxiv_uses_medrxiv_domain(self, _config: Config):
+        from opencite.models import IDSet, Paper
+
+        doi = "10.1101/2024.05.01.000999"
+        biorxiv_route = respx.get(f"https://www.biorxiv.org/content/{doi}.full").mock(
+            return_value=httpx.Response(404)
+        )
+        medrxiv_route = respx.get(f"https://www.medrxiv.org/content/{doi}.full").mock(
+            return_value=httpx.Response(
+                200,
+                text="<html><body><h1>A medRxiv paper</h1></body></html>",
+            )
+        )
+        async with MedRxivClient(_config) as client:
+            md = await client.fetch_fulltext(Paper(title="x", ids=IDSet(doi=doi)))
+        assert md is not None
+        assert "medRxiv paper" in md
+        assert medrxiv_route.called
+        assert not biorxiv_route.called
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_fulltext_404_returns_none(self, _config: Config):
+        from opencite.models import IDSet, Paper
+
+        doi = "10.1101/withdrawn"
+        respx.get(f"https://www.biorxiv.org/content/{doi}.full").mock(
+            return_value=httpx.Response(404)
+        )
+        async with BioRxivClient(_config) as client:
+            md = await client.fetch_fulltext(Paper(title="x", ids=IDSet(doi=doi)))
+        assert md is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_fulltext_no_doi_returns_none(self, _config: Config):
+        from opencite.models import IDSet, Paper
+
+        async with BioRxivClient(_config) as client:
+            md = await client.fetch_fulltext(Paper(title="x", ids=IDSet()))
+        assert md is None

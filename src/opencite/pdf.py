@@ -382,8 +382,9 @@ class PDFRetriever:
         extract_images: bool = True,
         converter: str = "auto",
         filename: str | None = None,
+        prefer_preprint_html: bool = True,
     ) -> Path | None:
-        """Try PMC full-text first, then fall back to PDF download + convert.
+        """Try PMC full-text, then preprint HTML, then fall back to PDF + convert.
 
         Args:
             identifier: DOI or other paper identifier.
@@ -392,11 +393,14 @@ class PDFRetriever:
             extract_images: Whether to extract/download images.
             converter: Converter for PDF fallback ("auto", "markitdown", "mistral").
             filename: Custom base filename (without extension).
+            prefer_preprint_html: When True, try the preprint server's HTML
+                route (ar5iv for arXiv, .full for bioRxiv/medRxiv) before PDF.
 
         Returns:
             Path to the markdown file, or None if all methods fail.
         """
         from opencite.fulltext import FullTextRetriever
+        from opencite.preprint_fulltext import PreprintFullTextRetriever
 
         # If no paper provided, try to get metadata
         if paper is None:
@@ -415,8 +419,40 @@ class PDFRetriever:
                 logger.info("Retrieved full text from PMC for %s", identifier)
                 return md_path
 
+        # Try preprint-native HTML (ar5iv / bioRxiv .full) before downloading a PDF.
+        if prefer_preprint_html:
+            async with PreprintFullTextRetriever(self.config) as pre:
+                if paper is not None:
+                    md_path = await pre.retrieve(
+                        paper,
+                        output_dir=output_dir,
+                        identifier=identifier,
+                        filename=filename,
+                    )
+                else:
+                    # _quick_lookup returned no metadata; fall back to the
+                    # identifier-only path so an arXiv/OSF/Zenodo/Figshare
+                    # DOI still routes to the right preprint client.
+                    logger.debug(
+                        "no paper metadata for %s; trying preprint route by identifier",
+                        identifier,
+                    )
+                    md_path = await pre.retrieve_for_identifier(
+                        identifier,
+                        output_dir=output_dir,
+                        filename=filename,
+                    )
+                if md_path:
+                    logger.info(
+                        "Retrieved preprint full text (HTML) for %s", identifier
+                    )
+                    return md_path
+
         # Fall back to PDF download + conversion
-        logger.debug("PMC full text not available for %s, trying PDF", identifier)
+        logger.info(
+            "PMC and preprint HTML full text unavailable for %s, trying PDF",
+            identifier,
+        )
         pdf_path = await self.download(
             identifier=identifier,
             output_dir=output_dir,

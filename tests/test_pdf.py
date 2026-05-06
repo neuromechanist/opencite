@@ -375,3 +375,103 @@ class TestUnpaywallIntegration:
         urls = await retriever._collect_urls(paper, "10.1234/test")
         # Should still have DOI URL at minimum
         assert "https://doi.org/10.1234/test" in urls
+
+
+class TestRetrieveAsMarkdownChainOrder:
+    """`PDFRetriever.retrieve_as_markdown` chains PMC -> preprint HTML -> PDF.
+
+    Stub the two retrievers to assert ordering and the early-exit semantics:
+    a successful tier short-circuits the rest of the chain.
+    """
+
+    @staticmethod
+    def _stub_paper() -> Paper:
+        return Paper(title="x", ids=IDSet(doi="10.48550/arXiv.1706.03762"))
+
+    @pytest.mark.asyncio
+    async def test_pmc_wins_over_preprint(self, tmp_path, monkeypatch):
+        retriever = _make_retriever()
+        retriever._quick_lookup = AsyncMock(return_value=self._stub_paper())
+
+        pmc_path = tmp_path / "pmc.md"
+        pmc_path.write_text("from pmc")
+
+        ft_instance = MagicMock()
+        ft_instance.__aenter__ = AsyncMock(return_value=ft_instance)
+        ft_instance.__aexit__ = AsyncMock(return_value=None)
+        ft_instance.retrieve = AsyncMock(return_value=pmc_path)
+
+        pre_called = MagicMock()
+
+        import opencite.fulltext as ft_mod
+        import opencite.preprint_fulltext as pre_mod
+
+        monkeypatch.setattr(ft_mod, "FullTextRetriever", lambda _c: ft_instance)
+        monkeypatch.setattr(pre_mod, "PreprintFullTextRetriever", pre_called)
+
+        result = await retriever.retrieve_as_markdown(
+            "10.48550/arXiv.1706.03762", output_dir=str(tmp_path)
+        )
+        assert result == pmc_path
+        pre_called.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preprint_wins_over_pdf_when_pmc_misses(self, tmp_path, monkeypatch):
+        retriever = _make_retriever()
+        retriever._quick_lookup = AsyncMock(return_value=self._stub_paper())
+
+        ft_instance = MagicMock()
+        ft_instance.__aenter__ = AsyncMock(return_value=ft_instance)
+        ft_instance.__aexit__ = AsyncMock(return_value=None)
+        ft_instance.retrieve = AsyncMock(return_value=None)  # PMC miss
+
+        pre_path = tmp_path / "preprint.md"
+        pre_path.write_text("from preprint")
+        pre_instance = MagicMock()
+        pre_instance.__aenter__ = AsyncMock(return_value=pre_instance)
+        pre_instance.__aexit__ = AsyncMock(return_value=None)
+        pre_instance.retrieve = AsyncMock(return_value=pre_path)
+
+        retriever.download = AsyncMock()
+
+        import opencite.fulltext as ft_mod
+        import opencite.preprint_fulltext as pre_mod
+
+        monkeypatch.setattr(ft_mod, "FullTextRetriever", lambda _c: ft_instance)
+        monkeypatch.setattr(
+            pre_mod, "PreprintFullTextRetriever", lambda _c: pre_instance
+        )
+
+        result = await retriever.retrieve_as_markdown(
+            "10.48550/arXiv.1706.03762", output_dir=str(tmp_path)
+        )
+        assert result == pre_path
+        retriever.download.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_preprint_html_skips_preprint_tier(self, tmp_path, monkeypatch):
+        """`prefer_preprint_html=False` must skip the preprint tier entirely."""
+        retriever = _make_retriever()
+        retriever._quick_lookup = AsyncMock(return_value=self._stub_paper())
+
+        ft_instance = MagicMock()
+        ft_instance.__aenter__ = AsyncMock(return_value=ft_instance)
+        ft_instance.__aexit__ = AsyncMock(return_value=None)
+        ft_instance.retrieve = AsyncMock(return_value=None)  # PMC miss
+
+        pre_called = MagicMock()
+        retriever.download = AsyncMock(return_value=None)  # PDF miss too
+
+        import opencite.fulltext as ft_mod
+        import opencite.preprint_fulltext as pre_mod
+
+        monkeypatch.setattr(ft_mod, "FullTextRetriever", lambda _c: ft_instance)
+        monkeypatch.setattr(pre_mod, "PreprintFullTextRetriever", pre_called)
+
+        await retriever.retrieve_as_markdown(
+            "10.48550/arXiv.1706.03762",
+            output_dir=str(tmp_path),
+            prefer_preprint_html=False,
+        )
+        pre_called.assert_not_called()
+        retriever.download.assert_called_once()

@@ -15,6 +15,7 @@ from opencite.pdf import PDFRetriever
 if TYPE_CHECKING:
     from opencite.config import Config
     from opencite.fulltext import FullTextRetriever
+    from opencite.preprint_fulltext import PreprintFullTextRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -135,12 +136,15 @@ async def batch_download(
     converter: str = "auto",
     concurrency: int = 3,
     prefer_fulltext: bool = True,
+    prefer_preprint_html: bool = True,
 ) -> BatchResult:
     """Download PDFs for multiple papers with controlled concurrency.
 
-    When convert=True and prefer_fulltext=True, tries PMC full-text
-    retrieval first (bypassing PDF entirely). Falls back to PDF download
-    + conversion if full text is not available.
+    When convert=True, the retrieval order is:
+    1. PMC full text (if `prefer_fulltext`).
+    2. Preprint server HTML (ar5iv / .full) for arXiv/bioRxiv/medRxiv DOIs
+       (if `prefer_preprint_html`).
+    3. PDF download + markdown conversion.
 
     Args:
         ids: List of DOIs or other identifiers.
@@ -150,6 +154,8 @@ async def batch_download(
         converter: Converter to use for markdown conversion.
         concurrency: Max concurrent downloads.
         prefer_fulltext: Try PMC full-text before PDF when converting.
+        prefer_preprint_html: Try preprint-native HTML before PDF (arXiv,
+            bioRxiv, medRxiv).
 
     Returns:
         BatchResult with summary statistics.
@@ -185,8 +191,21 @@ async def batch_download(
             extract_images=True,
         )
 
+    async def _try_preprint_html(
+        identifier: str,
+        pre_retriever: PreprintFullTextRetriever,
+    ) -> Path | None:
+        """Try preprint-native HTML retrieval for arXiv/bioRxiv/medRxiv DOIs."""
+        return await pre_retriever.retrieve_for_identifier(
+            identifier,
+            output_dir=str(md_dir),
+        )
+
     async def _process_one(
-        identifier: str, retriever: PDFRetriever, ft_retriever: FullTextRetriever | None
+        identifier: str,
+        retriever: PDFRetriever,
+        ft_retriever: FullTextRetriever | None,
+        pre_retriever: PreprintFullTextRetriever | None,
     ) -> None:
         async with semaphore:
             try:
@@ -198,6 +217,23 @@ async def batch_download(
                         result.converted += 1
                         print(
                             f"  OK (fulltext): {identifier} -> {md_path.name}",
+                            file=sys.stderr,
+                        )
+                        return
+
+                # Then try preprint-native HTML (ar5iv / .full).
+                if (
+                    convert
+                    and prefer_preprint_html
+                    and md_dir is not None
+                    and pre_retriever is not None
+                ):
+                    md_path = await _try_preprint_html(identifier, pre_retriever)
+                    if md_path:
+                        result.fulltext_retrieved += 1
+                        result.converted += 1
+                        print(
+                            f"  OK (preprint html): {identifier} -> {md_path.name}",
                             file=sys.stderr,
                         )
                         return
@@ -258,14 +294,27 @@ async def batch_download(
         ft_instance = _FTR(config)
         await ft_instance.__aenter__()
 
+    pre_instance: PreprintFullTextRetriever | None = None
+    if convert and prefer_preprint_html:
+        from opencite.preprint_fulltext import (
+            PreprintFullTextRetriever as _PreFTR,
+        )
+
+        pre_instance = _PreFTR(config)
+        await pre_instance.__aenter__()
+
     try:
         async with PDFRetriever(config) as retriever:
             tasks = [
-                asyncio.create_task(_process_one(id_, retriever, ft_instance))
+                asyncio.create_task(
+                    _process_one(id_, retriever, ft_instance, pre_instance)
+                )
                 for id_ in ids
             ]
             await asyncio.gather(*tasks)
     finally:
+        if pre_instance is not None:
+            await pre_instance.__aexit__()
         if ft_instance is not None:
             await ft_instance.__aexit__()
 

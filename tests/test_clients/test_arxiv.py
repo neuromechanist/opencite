@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import textwrap
 
+import httpx
+import pytest
+import respx
+
 from opencite.clients.arxiv import ArXivClient
 from opencite.config import Config
 
@@ -120,3 +124,127 @@ class TestArXivClientParsing:
             )
             papers = client._parse_feed(feed)
             assert papers[0].ids.arxiv_id == "1706.03762", f"Failed for {scheme}://"
+
+
+class TestArXivLookupDoi:
+    """Unit tests for ``ArXivClient.lookup_doi``.
+
+    Covers prefix detection (positive + negative + case-insensitive) and
+    the happy-path delegation to ``lookup_arxiv_id`` via respx.
+    """
+
+    @pytest.mark.parametrize(
+        "doi",
+        [
+            "10.1038/nature12373",
+            "10.1101/2024.01.01.000001",
+            "",
+            "not-a-doi",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_non_arxiv_doi_returns_none_without_network(self, doi: str):
+        """A non-arXiv DOI must short-circuit before any HTTP call."""
+        async with ArXivClient(Config()) as client:
+            with respx.mock(assert_all_called=False) as mock:
+                # If anything fires we'll see a route get called; we assert
+                # below that no route is needed at all.
+                assert await client.lookup_doi(doi) is None
+                assert not mock.routes
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_arxiv_doi_delegates_to_lookup_arxiv_id(self):
+        """A 10.48550/arXiv.<id> DOI hits the arXiv Atom API for that id."""
+        respx.get(
+            "https://export.arxiv.org/api/query",
+            params={"id_list": "1706.03762"},
+        ).mock(return_value=httpx.Response(200, text=_ATOM_FEED))
+        async with ArXivClient(Config()) as client:
+            paper = await client.lookup_doi("10.48550/arXiv.1706.03762")
+        assert paper is not None
+        assert paper.ids.arxiv_id == "1706.03762"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_arxiv_doi_prefix_is_case_insensitive(self):
+        """Uppercase ``ARXIV`` in the DOI prefix should still match."""
+        respx.get(
+            "https://export.arxiv.org/api/query",
+            params={"id_list": "1706.03762"},
+        ).mock(return_value=httpx.Response(200, text=_ATOM_FEED))
+        async with ArXivClient(Config()) as client:
+            paper = await client.lookup_doi("10.48550/ARXIV.1706.03762")
+        assert paper is not None
+        assert paper.ids.arxiv_id == "1706.03762"
+
+
+class TestArXivFulltext:
+    """Tests for the ar5iv HTML5 full-text route."""
+
+    def _paper_with_arxiv_id(self):
+        from opencite.models import IDSet, Paper
+
+        return Paper(title="Attention", ids=IDSet(arxiv_id="1706.03762"))
+
+    def _paper_with_arxiv_doi(self):
+        from opencite.models import IDSet, Paper
+
+        return Paper(title="Attention", ids=IDSet(doi="10.48550/arXiv.1706.03762"))
+
+    def test_fulltext_route_html_when_arxiv_id_present(self):
+        from opencite.clients.preprint_base import FulltextRoute
+
+        client = ArXivClient(Config())
+        assert client.fulltext_route(self._paper_with_arxiv_id()) == FulltextRoute.HTML
+
+    def test_fulltext_route_html_for_arxiv_doi(self):
+        from opencite.clients.preprint_base import FulltextRoute
+
+        client = ArXivClient(Config())
+        assert client.fulltext_route(self._paper_with_arxiv_doi()) == FulltextRoute.HTML
+
+    def test_fulltext_route_none_when_no_arxiv_signal(self):
+        from opencite.clients.preprint_base import FulltextRoute
+        from opencite.models import IDSet, Paper
+
+        client = ArXivClient(Config())
+        paper = Paper(title="Random", ids=IDSet(doi="10.1038/nature12373"))
+        assert client.fulltext_route(paper) == FulltextRoute.NONE
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_fulltext_uses_ar5iv(self):
+        respx.get("https://ar5iv.labs.arxiv.org/html/1706.03762").mock(
+            return_value=httpx.Response(
+                200,
+                text="<html><body><h1>Attention Is All You Need</h1>"
+                "<p>The dominant model.</p></body></html>",
+            )
+        )
+        async with ArXivClient(Config()) as client:
+            md = await client.fetch_fulltext(self._paper_with_arxiv_id())
+        assert md is not None
+        assert "Attention" in md
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_fulltext_404_returns_none(self):
+        respx.get("https://ar5iv.labs.arxiv.org/html/9999.99999").mock(
+            return_value=httpx.Response(404)
+        )
+        from opencite.models import IDSet, Paper
+
+        async with ArXivClient(Config()) as client:
+            md = await client.fetch_fulltext(
+                Paper(title="Missing", ids=IDSet(arxiv_id="9999.99999"))
+            )
+        assert md is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_fulltext_no_arxiv_signal_returns_none(self):
+        from opencite.models import IDSet, Paper
+
+        async with ArXivClient(Config()) as client:
+            md = await client.fetch_fulltext(Paper(title="Random", ids=IDSet()))
+        assert md is None

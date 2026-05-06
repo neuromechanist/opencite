@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenCite is a Python CLI tool and library for academic literature search and citation management. It aggregates results from five academic sources (Semantic Scholar, OpenAlex, PubMed, arXiv, bioRxiv/medRxiv), deduplicates them, and outputs results as formatted text, JSON, BibTeX, or CSV. It also supports PDF retrieval, batch downloads, and PDF-to-markdown conversion.
+OpenCite is a Python CLI tool and library for academic literature search and citation management. It aggregates results from a wide set of academic sources (Semantic Scholar, OpenAlex, PubMed, arXiv, bioRxiv, medRxiv, OSF Preprints, Zenodo, Figshare, CrossRef, CORE), deduplicates them, and outputs results as formatted text, JSON, BibTeX, or CSV. It also supports PDF retrieval, HTML full-text shortcuts for arXiv (ar5iv) and bioRxiv (.full), batch downloads, and PDF-to-markdown conversion.
 
 ## Build and Run
 
@@ -68,7 +68,10 @@ uv run ruff format src/ tests/   # format
 - **Semantic Scholar** -- `httpx` REST; TLDR summaries, SPECTER embeddings, batch 500 IDs, `citationStyles` for BibTeX
 - **PubMed/PMC** -- NCBI eutils XML; MeSH terms, ID Converter API; PMC BioC REST API for structured full-text (OA subset, ~4M+ articles)
 - **arXiv** -- Atom v1 API; search + direct lookup by arXiv ID; no key required; direct PDF at `arxiv.org/pdf/{id}`
-- **bioRxiv/medRxiv** -- CrossRef (`prefix:10.1101`) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required
+- **bioRxiv/medRxiv** -- CrossRef (`prefix:10.1101`) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required. Each is a first-class `--source`; container-title post-filtering keeps attribution clean.
+- **OSF Preprints** -- single client wrapping `api.osf.io/v2/preprints/`; covers PsyArXiv/SocArXiv/EarthArXiv/MetaArXiv. Provider slug recorded in `data_sources` as `osf:{provider}`; no key required.
+- **Zenodo** -- `zenodo.org/api/records` filtered to `resource_type=publication-preprint`; optional `ZENODO_ACCESS_TOKEN` for higher rate limits.
+- **Figshare** -- `api.figshare.com/v2/articles/search` filtered to `item_type=11` (preprint); no key required.
 
 ## Configuration
 

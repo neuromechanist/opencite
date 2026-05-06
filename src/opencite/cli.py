@@ -36,6 +36,10 @@ def create_parser() -> argparse.ArgumentParser:
             "pubmed",
             "arxiv",
             "biorxiv",
+            "medrxiv",
+            "osf",
+            "zenodo",
+            "figshare",
             "crossref",
             "core",
             "all",
@@ -144,6 +148,11 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip PMC full-text retrieval, force PDF download",
     )
+    pdf_p.add_argument(
+        "--no-preprint-html",
+        action="store_true",
+        help="skip preprint HTML routes (ar5iv, bioRxiv .full), force PDF download",
+    )
 
     # -- convert --
     convert_p = subparsers.add_parser("convert", help="convert a PDF to markdown")
@@ -208,6 +217,11 @@ def create_parser() -> argparse.ArgumentParser:
         "--no-fulltext",
         action="store_true",
         help="skip PMC full-text retrieval, force PDF download",
+    )
+    batch_p.add_argument(
+        "--no-preprint-html",
+        action="store_true",
+        help="skip preprint HTML routes (ar5iv, bioRxiv .full), force PDF download",
     )
 
     # -- config --
@@ -457,9 +471,9 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
     else:
         output_dir = output_val
 
-    # When --convert is used and --no-fulltext is not set, try PMC full-text
-    # first then fall back to PDF download + convert (all handled inside
-    # retrieve_as_markdown).
+    # When --convert is used, try PMC full text and preprint HTML before
+    # falling back to PDF download + convert. Both shortcuts are gated by
+    # their respective `--no-...` opt-out flags.
     if args.convert and not args.no_fulltext:
         async with PDFRetriever(config) as retriever:
             md_path = await retriever.retrieve_as_markdown(
@@ -468,6 +482,7 @@ async def _cmd_pdf(args: argparse.Namespace, config: object) -> int:
                 extract_images=True,
                 converter=args.converter,
                 filename=args.filename,
+                prefer_preprint_html=not args.no_preprint_html,
             )
         if md_path:
             print(f"Retrieved: {md_path}", file=sys.stderr)
@@ -584,6 +599,7 @@ async def _cmd_batch_fetch(args: argparse.Namespace, config: object) -> int:
         converter=args.converter,
         concurrency=args.concurrency,
         prefer_fulltext=not args.no_fulltext,
+        prefer_preprint_html=not args.no_preprint_html,
     )
 
     # Print summary

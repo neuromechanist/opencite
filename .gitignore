@@ -40,5 +40,8 @@ Thumbs.db
 # Plan files
 .plan
 
+# Claude epic state
+.claude/*.local.md
+
 # UV
 uv.lock

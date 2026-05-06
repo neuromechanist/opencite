@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from opencite.batch import (
     BatchResult,
+    batch_download,
     prepare_output_dirs,
     read_ids_from_file,
     read_ids_from_json,
     read_ids_from_stdin,
 )
+from opencite.config import Config
 
 
 class TestBatchResult:
@@ -210,3 +213,87 @@ class TestPrepareOutputDirs:
         assert pdf1 == pdf2
         assert md1 == md2
         assert img1 == img2
+
+
+class TestBatchPreprintIntegration:
+    """`batch_download` should try preprint HTML before PDF when converting.
+
+    Stub the retrievers and the PDFRetriever lifecycle so the wiring is
+    exercised without hitting the network or the real PDF pipeline.
+    """
+
+    @pytest.mark.asyncio
+    async def test_preprint_html_path_used_when_available(self, tmp_path, monkeypatch):
+        pdf_instance = MagicMock()
+        pdf_instance.__aenter__ = AsyncMock(return_value=pdf_instance)
+        pdf_instance.__aexit__ = AsyncMock(return_value=None)
+        pdf_instance.download = AsyncMock()
+        import opencite.batch as batch_mod
+
+        monkeypatch.setattr(batch_mod, "PDFRetriever", lambda _c: pdf_instance)
+
+        ft_instance = MagicMock()
+        ft_instance.__aenter__ = AsyncMock(return_value=ft_instance)
+        ft_instance.__aexit__ = AsyncMock(return_value=None)
+        ft_instance.retrieve = AsyncMock(return_value=None)
+        import opencite.fulltext as ft_mod
+
+        monkeypatch.setattr(ft_mod, "FullTextRetriever", lambda _c: ft_instance)
+
+        pre_instance = MagicMock()
+        pre_instance.__aenter__ = AsyncMock(return_value=pre_instance)
+        pre_instance.__aexit__ = AsyncMock(return_value=None)
+        out_md = tmp_path / "papers" / "markdown" / "preprint.md"
+        pre_instance.retrieve_for_identifier = AsyncMock(return_value=out_md)
+        import opencite.preprint_fulltext as pre_mod
+
+        monkeypatch.setattr(
+            pre_mod, "PreprintFullTextRetriever", lambda _c: pre_instance
+        )
+
+        result = await batch_download(
+            ids=["10.48550/arXiv.1706.03762"],
+            config=Config(),
+            output_dir=str(tmp_path / "papers"),
+            convert=True,
+        )
+
+        assert result.fulltext_retrieved == 1
+        assert result.converted == 1
+        pdf_instance.download.assert_not_called()
+        pre_instance.retrieve_for_identifier.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_preprint_html_skips_preprint_tier(self, tmp_path, monkeypatch):
+        """`prefer_preprint_html=False` must not even instantiate the retriever."""
+        pdf_instance = MagicMock()
+        pdf_instance.__aenter__ = AsyncMock(return_value=pdf_instance)
+        pdf_instance.__aexit__ = AsyncMock(return_value=None)
+        pdf_instance.download = AsyncMock(return_value=None)
+        import opencite.batch as batch_mod
+
+        monkeypatch.setattr(batch_mod, "PDFRetriever", lambda _c: pdf_instance)
+
+        ft_instance = MagicMock()
+        ft_instance.__aenter__ = AsyncMock(return_value=ft_instance)
+        ft_instance.__aexit__ = AsyncMock(return_value=None)
+        ft_instance.retrieve = AsyncMock(return_value=None)
+        import opencite.fulltext as ft_mod
+
+        monkeypatch.setattr(ft_mod, "FullTextRetriever", lambda _c: ft_instance)
+
+        pre_called = MagicMock()
+        import opencite.preprint_fulltext as pre_mod
+
+        monkeypatch.setattr(pre_mod, "PreprintFullTextRetriever", pre_called)
+
+        await batch_download(
+            ids=["10.48550/arXiv.1706.03762"],
+            config=Config(),
+            output_dir=str(tmp_path / "papers"),
+            convert=True,
+            prefer_preprint_html=False,
+        )
+
+        pre_called.assert_not_called()
+        pdf_instance.download.assert_called_once()

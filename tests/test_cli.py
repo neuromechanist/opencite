@@ -155,6 +155,29 @@ class TestCLIArgParsing:
         assert args.output == "/tmp/papers"
         assert args.convert is True
         assert args.converter == "mistral"
+        # Default: preprint HTML route is enabled.
+        assert args.no_preprint_html is False
+
+    def test_pdf_no_preprint_html_flag(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(
+            ["pdf", "10.48550/arXiv.1706.03762", "--convert", "--no-preprint-html"]
+        )
+        assert args.no_preprint_html is True
+
+    def test_batch_fetch_no_preprint_html_flag(self):
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(
+            ["batch-fetch", "ids.txt", "--convert", "--no-preprint-html"]
+        )
+        assert args.no_preprint_html is True
+        # And not set on the default invocation.
+        args2 = parser.parse_args(["batch-fetch", "ids.txt", "--convert"])
+        assert args2.no_preprint_html is False
 
     def test_convert_parser(self):
         from opencite.cli import create_parser

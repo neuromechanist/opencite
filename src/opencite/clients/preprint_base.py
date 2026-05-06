@@ -4,20 +4,58 @@ Concrete subclasses (arXiv, bioRxiv, medRxiv, OSF/PsyArXiv, Zenodo, Figshare)
 share the same surface so the search orchestrator and full-text dispatcher
 can treat them uniformly.
 
-Phase 1 introduces the surface only; Phase 2 wires up `fulltext_route` /
-`fetch_fulltext` for each subclass.
+Phase 1 introduces the surface; Phase 2 fills in `fulltext_route` /
+`fetch_fulltext` for arXiv (ar5iv HTML5) and bioRxiv/medRxiv (.full HTML).
 """
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from enum import StrEnum
+from io import BytesIO
 from typing import TYPE_CHECKING, ClassVar
 
 from opencite.clients.base import BaseClient
 
 if TYPE_CHECKING:
     from opencite.models import Paper
+
+logger = logging.getLogger(__name__)
+
+
+def html_to_markdown(html: str, context: str = "") -> str | None:
+    """Convert an HTML document to markdown using markitdown.
+
+    markitdown is the same library used by the PDF pipeline (`convert.py`),
+    so output style is consistent across full-text routes. Returns None on
+    conversion failure.
+
+    Args:
+        html: The HTML body to convert.
+        context: Identifier (DOI, arXiv ID, or "scheme:value") included in
+            warning messages so failures are traceable to a specific paper.
+    """
+    ctx = f" [{context}]" if context else ""
+    try:
+        from markitdown import MarkItDown
+    except ImportError:
+        logger.warning(
+            "markitdown is required for HTML-to-markdown conversion but is not installed%s",
+            ctx,
+        )
+        return None
+
+    try:
+        converter = MarkItDown()
+        result = converter.convert_stream(
+            BytesIO(html.encode("utf-8")),
+            file_extension=".html",
+        )
+        return result.text_content
+    except (OSError, ValueError, RuntimeError) as e:
+        logger.warning("HTML-to-markdown conversion failed%s: %s", ctx, e)
+        return None
 
 
 class FulltextRoute(StrEnum):

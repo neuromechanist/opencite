@@ -7,7 +7,13 @@ import re
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from opencite.clients.preprint_base import PreprintClient
+import httpx
+
+from opencite.clients.preprint_base import (
+    FulltextRoute,
+    PreprintClient,
+    html_to_markdown,
+)
 from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
 
@@ -17,6 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://export.arxiv.org/api"
+AR5IV_BASE = "https://ar5iv.labs.arxiv.org"
 
 _ATOM_NS = "http://www.w3.org/2005/Atom"
 _ARXIV_NS = "http://arxiv.org/schemas/atom"
@@ -103,6 +110,55 @@ class ArXivClient(PreprintClient):
             return None
         arxiv_id = doi.strip()[len(_ARXIV_DOI_PREFIX) :]
         return await self.lookup_arxiv_id(arxiv_id)
+
+    # ------------------------------------------------------------------
+    # Full-text retrieval (ar5iv HTML5)
+    # ------------------------------------------------------------------
+
+    def fulltext_route(self, paper: Paper) -> FulltextRoute:
+        """Use ar5iv HTML when an arXiv ID can be derived from the paper."""
+        return (
+            FulltextRoute.HTML if self._derive_arxiv_id(paper) else FulltextRoute.NONE
+        )
+
+    async def fetch_fulltext(self, paper: Paper) -> str | None:
+        """Fetch the ar5iv HTML5 rendering of *paper* and return markdown.
+
+        ar5iv (https://ar5iv.labs.arxiv.org) renders LaTeX source as semantic
+        HTML5, which converts to markdown more cleanly than the PDF and
+        preserves equations as MathML. Returns None when the paper has no
+        derivable arXiv ID, the response is not 200, or conversion fails.
+        """
+        arxiv_id = self._derive_arxiv_id(paper)
+        if not arxiv_id:
+            return None
+
+        if self._client is None:
+            raise RuntimeError("Client not initialized. Use 'async with'.")
+
+        url = f"{AR5IV_BASE}/html/{arxiv_id}"
+        try:
+            await self.rate_limiter.acquire()
+            resp = await self._client.get(url, follow_redirects=True)
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            logger.warning("ar5iv fetch failed for %s: %s", arxiv_id, e)
+            return None
+
+        if resp.status_code != 200:
+            logger.warning("ar5iv returned HTTP %d for %s", resp.status_code, arxiv_id)
+            return None
+
+        return html_to_markdown(resp.text, context=f"arxiv:{arxiv_id}")
+
+    @staticmethod
+    def _derive_arxiv_id(paper: Paper) -> str:
+        """Pull an arXiv ID out of `paper` via `ids.arxiv_id` or a Datacite DOI."""
+        if paper.ids.arxiv_id:
+            return paper.ids.arxiv_id.strip()
+        doi = (paper.doi or "").strip()
+        if doi.lower().startswith(_ARXIV_DOI_PREFIX):
+            return doi[len(_ARXIV_DOI_PREFIX) :]
+        return ""
 
     # ------------------------------------------------------------------
     # Parsing

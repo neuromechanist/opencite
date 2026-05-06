@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
-from opencite.clients.preprint_base import PreprintClient
+from opencite.clients.preprint_base import (
+    FulltextRoute,
+    PreprintClient,
+    html_to_markdown,
+)
 from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
 
@@ -64,11 +68,17 @@ class _BiorxivLikePreprintClient(PreprintClient):
 
     async def __aenter__(self) -> _BiorxivLikePreprintClient:
         await super().__aenter__()
-        self._crossref_client = httpx.AsyncClient(
-            base_url=_CROSSREF_BASE,
-            timeout=self.timeout,
-            headers=self._default_headers(),
-        )
+        try:
+            self._crossref_client = httpx.AsyncClient(
+                base_url=_CROSSREF_BASE,
+                timeout=self.timeout,
+                headers=self._default_headers(),
+            )
+        except Exception:
+            # The parent's session was opened above; close it before
+            # propagating so we don't leak the underlying httpx client.
+            await super().__aexit__()
+            raise
         return self
 
     async def __aexit__(self, *args: object) -> None:
@@ -187,6 +197,49 @@ class _BiorxivLikePreprintClient(PreprintClient):
 
         entry = collection[-1]
         return self._parse_content_entry(entry)
+
+    # ------------------------------------------------------------------
+    # Full-text retrieval (bioRxiv/medRxiv .full HTML)
+    # ------------------------------------------------------------------
+
+    def fulltext_route(self, paper: Paper) -> FulltextRoute:
+        """`.full` HTML when a 10.1101/* DOI is present, else NONE."""
+        doi = (paper.doi or "").strip()
+        return FulltextRoute.HTML if doi.startswith("10.1101/") else FulltextRoute.NONE
+
+    async def fetch_fulltext(self, paper: Paper) -> str | None:
+        """Fetch the bioRxiv/medRxiv `.full` HTML and return markdown.
+
+        Both servers expose articles at
+        ``https://www.{server}.org/content/{doi}.full`` (the same URL as the
+        PDF route minus the ``.pdf``). Returns None on missing DOI, non-200
+        response, or markdown conversion failure.
+        """
+        doi = (paper.doi or "").strip()
+        if not doi.startswith("10.1101/"):
+            return None
+
+        if self._client is None:
+            raise RuntimeError("Client not initialized. Use 'async with'.")
+
+        url = f"https://www.{self.server}.org/content/{doi}.full"
+        try:
+            await self.rate_limiter.acquire()
+            resp = await self._client.get(url, follow_redirects=True)
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            logger.warning("%s .full fetch failed for %s: %s", self.server, doi, e)
+            return None
+
+        if resp.status_code != 200:
+            logger.warning(
+                "%s .full returned HTTP %d for %s",
+                self.server,
+                resp.status_code,
+                doi,
+            )
+            return None
+
+        return html_to_markdown(resp.text, context=f"{self.server}:{doi}")
 
     # ------------------------------------------------------------------
     # Parsing helpers

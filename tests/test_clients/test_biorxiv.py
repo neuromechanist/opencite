@@ -1,4 +1,10 @@
-"""Tests for the bioRxiv/medRxiv API client."""
+"""Tests for the bioRxiv preprint client.
+
+Server-side parsing logic lives in :mod:`opencite.clients._biorxiv_like` and
+is shared with :class:`opencite.clients.medrxiv.MedRxivClient`; tests here
+exercise the bioRxiv-specific subclass and the shared parsing surface as
+seen from a BioRxivClient instance.
+"""
 
 from __future__ import annotations
 
@@ -43,7 +49,7 @@ class TestBioRxivClientParsing:
 
     def test_parse_content_entry_basic(self):
         client = self._client()
-        paper = client._parse_content_entry(_CONTENT_API_ENTRY, server="biorxiv")
+        paper = client._parse_content_entry(_CONTENT_API_ENTRY)
         assert paper is not None
         assert paper.title == "Sex-specific genetic effects across biomarkers"
         assert paper.ids.doi == "10.1101/837021"
@@ -54,14 +60,14 @@ class TestBioRxivClientParsing:
 
     def test_parse_content_entry_authors(self):
         client = self._client()
-        paper = client._parse_content_entry(_CONTENT_API_ENTRY, server="biorxiv")
+        paper = client._parse_content_entry(_CONTENT_API_ENTRY)
         assert paper is not None
         assert len(paper.authors) == 3
         assert paper.authors[0].family_name == "Smith"
 
     def test_parse_content_entry_pdf_url(self):
         client = self._client()
-        paper = client._parse_content_entry(_CONTENT_API_ENTRY, server="biorxiv")
+        paper = client._parse_content_entry(_CONTENT_API_ENTRY)
         assert paper is not None
         pdf = paper.best_pdf_url
         assert pdf is not None
@@ -73,14 +79,14 @@ class TestBioRxivClientParsing:
         long_abstract = "word " * 300  # > 1000 chars
         entry = {**_CONTENT_API_ENTRY, "abstract": long_abstract}
         client = self._client()
-        paper = client._parse_content_entry(entry, server="biorxiv")
+        paper = client._parse_content_entry(entry)
         assert paper is not None
         assert len(paper.abstract) <= 1000
 
     def test_parse_content_entry_no_title_returns_none(self):
         entry = {**_CONTENT_API_ENTRY, "title": ""}
         client = self._client()
-        assert client._parse_content_entry(entry, server="biorxiv") is None
+        assert client._parse_content_entry(entry) is None
 
     def test_parse_crossref_item_basic(self):
         client = self._client()
@@ -117,8 +123,8 @@ class TestBioRxivClientParsing:
         assert "10.1101/2024.09.12.612645" in pdf
         assert pdf.endswith(".full.pdf")
 
-    def test_parse_crossref_item_medrxiv_detection(self):
-        """container-title 'medRxiv' routes to medrxiv.org."""
+    def test_parse_crossref_item_medrxiv_filtered_out(self):
+        """BioRxivClient filters out CrossRef items whose container is medRxiv."""
         item = {
             **_CROSSREF_ITEM,
             "DOI": "10.1101/2021.01.01.12345",
@@ -126,26 +132,16 @@ class TestBioRxivClientParsing:
             "container-title": ["medRxiv"],
         }
         client = self._client()
-        paper = client._parse_crossref_item(item)
-        assert paper is not None
-        assert "medrxiv" in paper.data_sources
-        pdf = paper.best_pdf_url
-        assert pdf is not None
-        assert "medrxiv.org" in pdf
-
-    def test_parse_content_entry_medrxiv(self):
-        """server='medrxiv' sets data_sources and URL correctly."""
-        entry = {**_CONTENT_API_ENTRY, "doi": "10.1101/2021.01.01.12345"}
-        client = self._client()
-        paper = client._parse_content_entry(entry, server="medrxiv")
-        assert paper is not None
-        assert "medrxiv" in paper.data_sources
-        assert paper.url is not None and "medrxiv.org" in paper.url
-        pdf = paper.best_pdf_url
-        assert pdf is not None
-        assert "medrxiv.org" in pdf
+        # BioRxivClient should not claim a medRxiv item; that work belongs
+        # to MedRxivClient.
+        assert client._parse_crossref_item(item) is None
 
     def test_parse_crossref_item_no_title_returns_none(self):
         item = {**_CROSSREF_ITEM, "title": []}
         client = self._client()
         assert client._parse_crossref_item(item) is None
+
+    def test_class_attributes(self):
+        """BioRxivClient declares the canonical name/server attributes."""
+        assert BioRxivClient.name == "biorxiv"
+        assert BioRxivClient.server == "biorxiv"

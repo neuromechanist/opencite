@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import textwrap
 
+import httpx
+import pytest
+import respx
+
 from opencite.clients.arxiv import ArXivClient
 from opencite.config import Config
 
@@ -120,3 +124,56 @@ class TestArXivClientParsing:
             )
             papers = client._parse_feed(feed)
             assert papers[0].ids.arxiv_id == "1706.03762", f"Failed for {scheme}://"
+
+
+class TestArXivLookupDoi:
+    """Unit tests for ``ArXivClient.lookup_doi``.
+
+    Covers prefix detection (positive + negative + case-insensitive) and
+    the happy-path delegation to ``lookup_arxiv_id`` via respx.
+    """
+
+    @pytest.mark.parametrize(
+        "doi",
+        [
+            "10.1038/nature12373",
+            "10.1101/2024.01.01.000001",
+            "",
+            "not-a-doi",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_non_arxiv_doi_returns_none_without_network(self, doi: str):
+        """A non-arXiv DOI must short-circuit before any HTTP call."""
+        async with ArXivClient(Config()) as client:
+            with respx.mock(assert_all_called=False) as mock:
+                # If anything fires we'll see a route get called; we assert
+                # below that no route is needed at all.
+                assert await client.lookup_doi(doi) is None
+                assert not mock.routes
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_arxiv_doi_delegates_to_lookup_arxiv_id(self):
+        """A 10.48550/arXiv.<id> DOI hits the arXiv Atom API for that id."""
+        respx.get(
+            "https://export.arxiv.org/api/query",
+            params={"id_list": "1706.03762"},
+        ).mock(return_value=httpx.Response(200, text=_ATOM_FEED))
+        async with ArXivClient(Config()) as client:
+            paper = await client.lookup_doi("10.48550/arXiv.1706.03762")
+        assert paper is not None
+        assert paper.ids.arxiv_id == "1706.03762"
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_arxiv_doi_prefix_is_case_insensitive(self):
+        """Uppercase ``ARXIV`` in the DOI prefix should still match."""
+        respx.get(
+            "https://export.arxiv.org/api/query",
+            params={"id_list": "1706.03762"},
+        ).mock(return_value=httpx.Response(200, text=_ATOM_FEED))
+        async with ArXivClient(Config()) as client:
+            paper = await client.lookup_doi("10.48550/ARXIV.1706.03762")
+        assert paper is not None
+        assert paper.ids.arxiv_id == "1706.03762"

@@ -10,6 +10,7 @@ from opencite.clients.arxiv import ArXivClient
 from opencite.clients.biorxiv import BioRxivClient
 from opencite.clients.core import COREClient
 from opencite.clients.crossref import CrossRefClient
+from opencite.clients.medrxiv import MedRxivClient
 from opencite.clients.openalex import OpenAlexClient
 from opencite.clients.pubmed import PubMedClient
 from opencite.clients.semantic_scholar import SemanticScholarClient
@@ -21,7 +22,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ALL_SOURCES = ("openalex", "s2", "pubmed", "arxiv", "biorxiv", "crossref", "core")
+ALL_SOURCES = (
+    "openalex",
+    "s2",
+    "pubmed",
+    "arxiv",
+    "biorxiv",
+    "medrxiv",
+    "crossref",
+    "core",
+)
 
 
 class SearchOrchestrator:
@@ -42,6 +52,7 @@ class SearchOrchestrator:
         self._pubmed = PubMedClient(config)
         self._arxiv = ArXivClient(config)
         self._biorxiv = BioRxivClient(config)
+        self._medrxiv = MedRxivClient(config)
         self._crossref = CrossRefClient(config)
         self._core = COREClient(config)
 
@@ -51,6 +62,7 @@ class SearchOrchestrator:
         await self._pubmed.__aenter__()
         await self._arxiv.__aenter__()
         await self._biorxiv.__aenter__()
+        await self._medrxiv.__aenter__()
         await self._crossref.__aenter__()
         await self._core.__aenter__()
         return self
@@ -61,6 +73,7 @@ class SearchOrchestrator:
         await self._pubmed.__aexit__()
         await self._arxiv.__aexit__()
         await self._biorxiv.__aexit__()
+        await self._medrxiv.__aexit__()
         await self._crossref.__aexit__()
         await self._core.__aexit__()
 
@@ -102,6 +115,10 @@ class SearchOrchestrator:
         if "biorxiv" in sources:
             tasks["biorxiv"] = asyncio.create_task(
                 self._search_biorxiv(query, max_results)
+            )
+        if "medrxiv" in sources:
+            tasks["medrxiv"] = asyncio.create_task(
+                self._search_medrxiv(query, max_results)
             )
         if "crossref" in sources:
             tasks["crossref"] = asyncio.create_task(
@@ -214,6 +231,9 @@ class SearchOrchestrator:
     async def _search_biorxiv(self, query: str, max_results: int) -> list[Paper]:
         return await self._biorxiv.search(query, max_results=max_results)
 
+    async def _search_medrxiv(self, query: str, max_results: int) -> list[Paper]:
+        return await self._medrxiv.search(query, max_results=max_results)
+
     async def _search_crossref(
         self,
         query: str,
@@ -281,13 +301,22 @@ class SearchOrchestrator:
                 tasks.append(asyncio.create_task(self._s2.lookup(f"DOI:{paper.doi}")))
             if "pubmed" not in paper.data_sources:
                 tasks.append(asyncio.create_task(self._pubmed.lookup_doi(paper.doi)))
-            # For bioRxiv/medRxiv preprints, enrich from their content API
+            # For bioRxiv/medRxiv preprints, enrich from their Content APIs.
+            # Both share the 10.1101 DOI prefix; fan out in parallel and the
+            # one that hosts the preprint will return; the other returns None.
             if (
                 paper.doi.startswith("10.1101/")
                 and "biorxiv" not in paper.data_sources
                 and "medrxiv" not in paper.data_sources
             ):
                 tasks.append(asyncio.create_task(self._biorxiv.lookup_doi(paper.doi)))
+                tasks.append(asyncio.create_task(self._medrxiv.lookup_doi(paper.doi)))
+            # For arXiv DOIs, enrich from the arXiv API directly.
+            if (
+                paper.doi.lower().startswith("10.48550/arxiv.")
+                and "arxiv" not in paper.data_sources
+            ):
+                tasks.append(asyncio.create_task(self._arxiv.lookup_doi(paper.doi)))
         elif paper.pmid:
             if "openalex" not in paper.data_sources:
                 tasks.append(

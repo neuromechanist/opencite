@@ -36,6 +36,7 @@ def create_parser() -> argparse.ArgumentParser:
             "pubmed",
             "arxiv",
             "biorxiv",
+            "medrxiv",
             "crossref",
             "core",
             "all",

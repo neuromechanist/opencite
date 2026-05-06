@@ -167,6 +167,9 @@ class Config:
     wiley_tdm_token: str = ""
     springer_api_key: str = ""
 
+    # Preprint server tokens (optional; raise rate limits where supported)
+    zenodo_access_token: str = ""
+
     # Rate limits (requests per second)
     openalex_rate_limit: float = 100.0
     s2_rate_limit: float = 1.0
@@ -176,6 +179,9 @@ class Config:
     crossref_rate_limit: float = 50.0
     core_rate_limit: float = 0.5
     unpaywall_rate_limit: float = 10.0
+    osf_rate_limit: float = 5.0
+    zenodo_rate_limit: float = 2.0
+    figshare_rate_limit: float = 5.0
 
     # Request settings
     timeout: float = 30.0

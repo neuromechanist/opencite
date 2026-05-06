@@ -12,7 +12,14 @@ from tests.conftest import skip_without_all_keys
 
 def test_all_sources_includes_preprint_servers():
     """Preprint servers are first-class entries in ALL_SOURCES."""
-    for src in ("arxiv", "biorxiv", "medrxiv"):
+    for src in (
+        "arxiv",
+        "biorxiv",
+        "medrxiv",
+        "osf",
+        "zenodo",
+        "figshare",
+    ):
         assert src in ALL_SOURCES
 
 

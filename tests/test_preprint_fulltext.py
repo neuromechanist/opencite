@@ -185,6 +185,46 @@ class TestWrite:
         assert "arxiv: 10.48550/arXiv.1706.03762" in content
 
 
+class TestPickClientNewServers:
+    """`_pick_client` routes Phase 3 DOI prefixes to the right client."""
+
+    @pytest.mark.asyncio
+    async def test_osf_doi_routes_to_osf(self, _config: Config):
+        from opencite.clients.osf import OSFClient
+
+        async with PreprintFullTextRetriever(
+            _config, clients=[OSFClient(_config)]
+        ) as r:
+            paper = Paper(title="x", ids=IDSet(doi="10.31234/osf.io/abc12"))
+            client = r._pick_client(paper)
+        assert client is not None
+        assert client.name == "osf"
+
+    @pytest.mark.asyncio
+    async def test_zenodo_doi_routes_to_zenodo(self, _config: Config):
+        from opencite.clients.zenodo import ZenodoClient
+
+        async with PreprintFullTextRetriever(
+            _config, clients=[ZenodoClient(_config)]
+        ) as r:
+            paper = Paper(title="x", ids=IDSet(doi="10.5281/zenodo.123456"))
+            client = r._pick_client(paper)
+        assert client is not None
+        assert client.name == "zenodo"
+
+    @pytest.mark.asyncio
+    async def test_figshare_doi_routes_to_figshare(self, _config: Config):
+        from opencite.clients.figshare import FigshareClient
+
+        async with PreprintFullTextRetriever(
+            _config, clients=[FigshareClient(_config)]
+        ) as r:
+            paper = Paper(title="x", ids=IDSet(doi="10.6084/m9.figshare.999"))
+            client = r._pick_client(paper)
+        assert client is not None
+        assert client.name == "figshare"
+
+
 class TestPickClientPriority:
     """``data_sources`` attribution must win over DOI prefix."""
 

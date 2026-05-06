@@ -6,8 +6,14 @@ import pytest
 
 from opencite.config import Config
 from opencite.models import Paper
-from opencite.search import SearchOrchestrator, _sort_papers
+from opencite.search import ALL_SOURCES, SearchOrchestrator, _sort_papers
 from tests.conftest import skip_without_all_keys
+
+
+def test_all_sources_includes_preprint_servers():
+    """Preprint servers are first-class entries in ALL_SOURCES."""
+    for src in ("arxiv", "biorxiv", "medrxiv"):
+        assert src in ALL_SOURCES
 
 
 @pytest.fixture

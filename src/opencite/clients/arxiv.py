@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from opencite.clients.base import BaseClient
+from opencite.clients.preprint_base import PreprintClient
 from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
 
@@ -21,13 +21,18 @@ BASE_URL = "https://export.arxiv.org/api"
 _ATOM_NS = "http://www.w3.org/2005/Atom"
 _ARXIV_NS = "http://arxiv.org/schemas/atom"
 
+# arXiv DOI prefix (Datacite-registered arXiv DOIs follow `10.48550/arXiv.<id>`).
+_ARXIV_DOI_PREFIX = "10.48550/arxiv."
 
-class ArXivClient(BaseClient):
+
+class ArXivClient(PreprintClient):
     """Client for the arXiv Atom v1 search API.
 
     Requires no API key. arXiv's terms of service ask for polite
     crawling (<= 1 req/3 sec for bulk; 3/sec is the hard cap).
     """
+
+    name: ClassVar[str] = "arxiv"
 
     def __init__(self, config: Config) -> None:
         super().__init__(
@@ -85,6 +90,19 @@ class ArXivClient(BaseClient):
         except APIError as e:
             logger.warning("arXiv lookup failed for %s: %s", arxiv_id, e.message)
             return None
+
+    async def lookup_doi(self, doi: str) -> Paper | None:
+        """Look up an arXiv preprint by DOI.
+
+        arXiv DOIs follow ``10.48550/arXiv.<id>`` (Datacite). For other DOIs
+        (e.g. publisher DOIs assigned after journal acceptance) this returns
+        None; the orchestrator falls back to other clients.
+        """
+        normalized = doi.strip().lower()
+        if not normalized.startswith(_ARXIV_DOI_PREFIX):
+            return None
+        arxiv_id = doi.strip()[len(_ARXIV_DOI_PREFIX) :]
+        return await self.lookup_arxiv_id(arxiv_id)
 
     # ------------------------------------------------------------------
     # Parsing

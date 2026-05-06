@@ -351,8 +351,8 @@ class SearchOrchestrator:
                 and "arxiv" not in paper.data_sources
             ):
                 tasks.append(asyncio.create_task(self._arxiv.lookup_doi(paper.doi)))
-            # OSF Preprints
-            if paper.doi.lower().startswith("10.31234/osf.io/") and not any(
+            # OSF Preprints (multi-prefix coverage: PsyArXiv, SocArXiv, ...).
+            if OSFClient.is_osf_doi(paper.doi) and not any(
                 s == "osf" or s.startswith("osf:") for s in paper.data_sources
             ):
                 tasks.append(asyncio.create_task(self._osf.lookup_doi(paper.doi)))

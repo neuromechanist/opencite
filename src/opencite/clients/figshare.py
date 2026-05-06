@@ -11,6 +11,7 @@ No API key required for public read access.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -82,14 +83,26 @@ class FigshareClient(PreprintClient):
             logger.warning("Figshare search returned unexpected payload for %r", query)
             return []
 
-        # Search returns summary items; for each, fetch the full record so
-        # we get authors, files, tags, etc.
-        papers: list[Paper] = []
+        # Search returns summary items; each needs a per-article GET to
+        # populate authors / files / tags. Fan out concurrently -- the
+        # rate limiter in BaseClient still serialises one-per-token, so
+        # the wall-clock time is bounded by `len(items) / rate_limit`
+        # rather than the sequential sum.
+        article_ids: list[int | str] = []
         for summary in items:
             article_id = summary.get("id")
             if not article_id:
+                logger.warning("Figshare search summary missing id for query %r", query)
                 continue
-            full = await self._fetch_article(article_id)
+            article_ids.append(article_id)
+
+        full_records = await asyncio.gather(
+            *(self._fetch_article(aid) for aid in article_ids),
+            return_exceptions=False,
+        )
+
+        papers: list[Paper] = []
+        for full in full_records:
             if full is None:
                 continue
             paper = self._parse_article(full)

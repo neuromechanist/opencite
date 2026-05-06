@@ -164,3 +164,89 @@ class TestSearchOrchestrator:
                 year_to=2024,
             )
         assert len(result.papers) > 0
+
+
+class TestEnrichPreprintBranches:
+    """Unit tests for the new Phase 3 DOI-prefix branches in `_enrich`.
+
+    These don't hit the network: each preprint client's `lookup_doi` is
+    replaced with a stub that records calls. We assert the orchestrator
+    schedules a lookup for the right client based on DOI prefix and the
+    existing `data_sources` attribution guard.
+    """
+
+    @pytest.fixture
+    def orchestrator(self):
+        from unittest.mock import AsyncMock
+
+        from opencite.search import SearchOrchestrator
+
+        orch = SearchOrchestrator(Config())
+        for client_attr in (
+            "_openalex",
+            "_s2",
+            "_pubmed",
+            "_arxiv",
+            "_biorxiv",
+            "_medrxiv",
+            "_osf",
+            "_zenodo",
+            "_figshare",
+            "_crossref",
+            "_core",
+        ):
+            client = getattr(orch, client_attr)
+            client.lookup_doi = AsyncMock(return_value=None)
+            if hasattr(client, "lookup"):
+                client.lookup = AsyncMock(return_value=None)
+            if hasattr(client, "lookup_pmid"):
+                client.lookup_pmid = AsyncMock(return_value=None)
+        return orch
+
+    @pytest.mark.asyncio
+    async def test_osf_doi_triggers_osf_lookup(self, orchestrator):
+        from opencite.models import IDSet
+
+        paper = Paper(title="x", ids=IDSet(doi="10.31234/osf.io/abc12"))
+        await orchestrator._enrich(paper)
+        orchestrator._osf.lookup_doi.assert_called_once_with("10.31234/osf.io/abc12")
+
+    @pytest.mark.asyncio
+    async def test_osf_skipped_when_already_attributed(self, orchestrator):
+        from opencite.models import IDSet
+
+        paper = Paper(
+            title="x",
+            ids=IDSet(doi="10.31234/osf.io/abc12"),
+            data_sources={"osf:psyarxiv"},
+        )
+        await orchestrator._enrich(paper)
+        orchestrator._osf.lookup_doi.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_zenodo_doi_triggers_zenodo_lookup(self, orchestrator):
+        from opencite.models import IDSet
+
+        paper = Paper(title="x", ids=IDSet(doi="10.5281/zenodo.123456"))
+        await orchestrator._enrich(paper)
+        orchestrator._zenodo.lookup_doi.assert_called_once_with("10.5281/zenodo.123456")
+
+    @pytest.mark.asyncio
+    async def test_figshare_doi_triggers_figshare_lookup(self, orchestrator):
+        from opencite.models import IDSet
+
+        paper = Paper(title="x", ids=IDSet(doi="10.6084/m9.figshare.999"))
+        await orchestrator._enrich(paper)
+        orchestrator._figshare.lookup_doi.assert_called_once_with(
+            "10.6084/m9.figshare.999"
+        )
+
+    @pytest.mark.asyncio
+    async def test_unrelated_doi_does_not_trigger_preprint_clients(self, orchestrator):
+        from opencite.models import IDSet
+
+        paper = Paper(title="x", ids=IDSet(doi="10.1038/nature12373"))
+        await orchestrator._enrich(paper)
+        orchestrator._osf.lookup_doi.assert_not_called()
+        orchestrator._zenodo.lookup_doi.assert_not_called()
+        orchestrator._figshare.lookup_doi.assert_not_called()

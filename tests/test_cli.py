@@ -158,6 +158,15 @@ class TestCLIArgParsing:
         # Default: preprint HTML route is enabled.
         assert args.no_preprint_html is False
 
+    def test_search_source_phase3_choices(self):
+        """Phase 3 sources must be valid `--source` values."""
+        from opencite.cli import create_parser
+
+        parser = create_parser()
+        for src in ("osf", "zenodo", "figshare"):
+            args = parser.parse_args(["search", "q", "--source", src])
+            assert args.source == src
+
     def test_pdf_no_preprint_html_flag(self):
         from opencite.cli import create_parser
 

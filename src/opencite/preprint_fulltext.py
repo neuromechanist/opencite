@@ -108,7 +108,7 @@ class PreprintFullTextRetriever:
             return None
         if doi.startswith("10.48550/arxiv."):
             return self._by_name.get("arxiv")
-        if doi.startswith("10.31234/osf.io/"):
+        if OSFClient.is_osf_doi(doi):
             return self._by_name.get("osf")
         if doi.startswith("10.5281/zenodo."):
             return self._by_name.get("zenodo")

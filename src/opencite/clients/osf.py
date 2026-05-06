@@ -27,8 +27,13 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.osf.io"
 
-# OSF Preprints DOI prefix (Crossref-registered).
-_OSF_DOI_PREFIX = "10.31234/osf.io/"
+# OSF preprints span several DataCite prefixes per provider:
+# 10.31234/osf.io/ -- PsyArXiv
+# 10.31219/osf.io/ -- OSF Preprints / general
+# 10.31222/osf.io/ -- SocArXiv
+# 10.31223/X5W -- EarthArXiv (without /osf.io/ segment)
+# Be liberal: any DOI containing ``/osf.io/`` is OSF-hosted.
+_OSF_DOI_PATTERN = re.compile(r"^10\.\d+/osf\.io/", re.IGNORECASE)
 
 
 class OSFClient(PreprintClient):
@@ -98,10 +103,11 @@ class OSFClient(PreprintClient):
     async def lookup_doi(self, doi: str) -> Paper | None:
         """Look up an OSF preprint by DOI.
 
-        OSF Preprint DOIs follow ``10.31234/osf.io/<guid>``. Other DOIs
-        return None so the orchestrator can route to other clients.
+        OSF Preprint DOIs share an ``/osf.io/`` segment across providers
+        (PsyArXiv, SocArXiv, etc.). Non-OSF DOIs return None so the
+        orchestrator can route elsewhere.
         """
-        if not doi.lower().startswith(_OSF_DOI_PREFIX):
+        if not _OSF_DOI_PATTERN.match(doi.strip()):
             return None
 
         try:
@@ -142,12 +148,21 @@ class OSFClient(PreprintClient):
         if pub_date and pub_date[:4].isdigit():
             year = int(pub_date[:4])
 
-        # DOI lives on attributes (not in IDs in JSON:API parlance).
+        # OSF JSON:API: ``attributes.doi`` is null for many published
+        # preprints (the canonical DOI lives in ``links.preprint_doi`` as a
+        # full URL like ``https://doi.org/10.31234/osf.io/<guid>``).
+        # Try attributes first, then strip the URL form for the fallback.
         doi = (attrs.get("doi") or "").strip()
+        if not doi:
+            preprint_doi_url = (item.get("links") or {}).get("preprint_doi") or ""
+            if preprint_doi_url:
+                # ``https://doi.org/10.31234/osf.io/abc12`` -> ``10.31234/osf.io/abc12``
+                doi = re.sub(
+                    r"^https?://(dx\.)?doi\.org/", "", preprint_doi_url.strip()
+                )
         ids = IDSet(doi=doi)
 
-        # Provider slug for attribution. JSON:API embeds the relationship,
-        # but the cheap path is the included list or the relationships map.
+        # Provider slug for attribution.
         provider = (
             ((item.get("relationships") or {}).get("provider") or {})
             .get("data", {})
@@ -161,18 +176,20 @@ class OSFClient(PreprintClient):
                 topics.append(tag)
 
         # Authors are a separate JSON:API endpoint; OSF preprints don't
-        # inline them. We can derive a minimal placeholder from the
-        # citation if present, but in practice users follow up via the
-        # dedup pipeline merging metadata from CrossRef/OpenAlex.
+        # inline them. The dedup pipeline merges author lists from
+        # CrossRef/OpenAlex when the same DOI surfaces there.
         authors: list[Author] = []
 
-        # PDF: OSF preprints expose a `download` link in `links`.
+        # PDF: OSF preprints don't expose a download URL on the preprint
+        # object directly (the primary file is a separate JSON:API
+        # resource). The redirect endpoint at ``osf.io/download/{guid}``
+        # serves the primary file with no extra round-trip.
         pdf_locations: list[PDFLocation] = []
-        download_url = (item.get("links") or {}).get("download") or ""
-        if download_url:
+        preprint_id = (item.get("id") or "").strip()
+        if preprint_id:
             pdf_locations.append(
                 PDFLocation(
-                    url=download_url,
+                    url=f"https://osf.io/download/{preprint_id}",
                     version="submittedVersion",
                     is_oa=True,
                     source=f"osf:{provider}" if provider else "osf",
@@ -207,5 +224,6 @@ class OSFClient(PreprintClient):
         )
 
     @staticmethod
-    def _is_osf_doi(doi: str) -> bool:
-        return bool(re.match(r"^10\.31234/osf\.io/", doi.strip(), re.IGNORECASE))
+    def is_osf_doi(doi: str) -> bool:
+        """Return True if *doi* points to an OSF-hosted preprint."""
+        return bool(_OSF_DOI_PATTERN.match(doi.strip()))

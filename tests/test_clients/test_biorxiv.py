@@ -49,7 +49,7 @@ class TestBioRxivClientParsing:
 
     def test_parse_content_entry_basic(self):
         client = self._client()
-        paper = client._parse_content_entry(_CONTENT_API_ENTRY, server="biorxiv")
+        paper = client._parse_content_entry(_CONTENT_API_ENTRY)
         assert paper is not None
         assert paper.title == "Sex-specific genetic effects across biomarkers"
         assert paper.ids.doi == "10.1101/837021"
@@ -60,14 +60,14 @@ class TestBioRxivClientParsing:
 
     def test_parse_content_entry_authors(self):
         client = self._client()
-        paper = client._parse_content_entry(_CONTENT_API_ENTRY, server="biorxiv")
+        paper = client._parse_content_entry(_CONTENT_API_ENTRY)
         assert paper is not None
         assert len(paper.authors) == 3
         assert paper.authors[0].family_name == "Smith"
 
     def test_parse_content_entry_pdf_url(self):
         client = self._client()
-        paper = client._parse_content_entry(_CONTENT_API_ENTRY, server="biorxiv")
+        paper = client._parse_content_entry(_CONTENT_API_ENTRY)
         assert paper is not None
         pdf = paper.best_pdf_url
         assert pdf is not None
@@ -79,14 +79,14 @@ class TestBioRxivClientParsing:
         long_abstract = "word " * 300  # > 1000 chars
         entry = {**_CONTENT_API_ENTRY, "abstract": long_abstract}
         client = self._client()
-        paper = client._parse_content_entry(entry, server="biorxiv")
+        paper = client._parse_content_entry(entry)
         assert paper is not None
         assert len(paper.abstract) <= 1000
 
     def test_parse_content_entry_no_title_returns_none(self):
         entry = {**_CONTENT_API_ENTRY, "title": ""}
         client = self._client()
-        assert client._parse_content_entry(entry, server="biorxiv") is None
+        assert client._parse_content_entry(entry) is None
 
     def test_parse_crossref_item_basic(self):
         client = self._client()
@@ -135,23 +135,6 @@ class TestBioRxivClientParsing:
         # BioRxivClient should not claim a medRxiv item; that work belongs
         # to MedRxivClient.
         assert client._parse_crossref_item(item) is None
-
-    def test_parse_content_entry_medrxiv_override(self):
-        """The shared parser still accepts an explicit server override.
-
-        The bioRxiv Content API and medRxiv Content API share the same JSON
-        shape; the helper is server-agnostic, and the explicit override is
-        used by lookup-time code paths.
-        """
-        entry = {**_CONTENT_API_ENTRY, "doi": "10.1101/2021.01.01.12345"}
-        client = self._client()
-        paper = client._parse_content_entry(entry, server="medrxiv")
-        assert paper is not None
-        assert "medrxiv" in paper.data_sources
-        assert paper.url is not None and "medrxiv.org" in paper.url
-        pdf = paper.best_pdf_url
-        assert pdf is not None
-        assert "medrxiv.org" in pdf
 
     def test_parse_crossref_item_no_title_returns_none(self):
         item = {**_CROSSREF_ITEM, "title": []}

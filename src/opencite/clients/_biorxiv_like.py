@@ -46,6 +46,13 @@ class _BiorxivLikePreprintClient(PreprintClient):
 
     server: ClassVar[str]
 
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        if cls.__name__.startswith("_"):
+            return
+        if not getattr(cls, "__abstractmethods__", None) and not hasattr(cls, "server"):
+            raise TypeError(f"{cls.__name__} must declare a `server` class attribute")
+
     def __init__(self, config: Config) -> None:
         super().__init__(
             config=config,
@@ -179,17 +186,15 @@ class _BiorxivLikePreprintClient(PreprintClient):
             return None
 
         entry = collection[-1]
-        return self._parse_content_entry(entry, server=self.server)
+        return self._parse_content_entry(entry)
 
     # ------------------------------------------------------------------
     # Parsing helpers
     # ------------------------------------------------------------------
 
-    def _parse_content_entry(
-        self, entry: dict, server: str | None = None
-    ) -> Paper | None:
+    def _parse_content_entry(self, entry: dict) -> Paper | None:
         """Parse a single record from the bioRxiv Content API."""
-        srv = server or self.server
+        srv = self.server
         doi = (entry.get("doi") or "").strip()
         title = (entry.get("title") or "").strip()
         if not title:

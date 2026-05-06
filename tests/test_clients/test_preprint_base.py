@@ -61,3 +61,28 @@ class TestPreprintClientABC:
     async def test_default_fetch_fulltext_returns_none(self, cls):
         client = cls(Config())
         assert await client.fetch_fulltext(None) is None  # type: ignore[arg-type]
+
+
+class TestPreprintClientSubclassEnforcement:
+    """`__init_subclass__` rejects subclasses missing required class attrs."""
+
+    def test_missing_name_raises(self):
+        with pytest.raises(TypeError, match="must declare a `name`"):
+
+            class BadConcreteClient(PreprintClient):  # type: ignore[misc]
+                async def search(self, query, max_results=20, **kwargs):  # noqa: ARG002
+                    return []
+
+                async def lookup_doi(self, doi):  # noqa: ARG002
+                    return None
+
+                def _default_headers(self):
+                    return {}
+
+    def test_missing_server_raises_for_biorxiv_like(self):
+        from opencite.clients._biorxiv_like import _BiorxivLikePreprintClient
+
+        with pytest.raises(TypeError, match="must declare a `server`"):
+
+            class BadConcreteServerClient(_BiorxivLikePreprintClient):  # type: ignore[misc]
+                name = "bad-without-server"

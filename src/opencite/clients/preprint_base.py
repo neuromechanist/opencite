@@ -42,6 +42,20 @@ class PreprintClient(BaseClient, ABC):
 
     name: ClassVar[str]
 
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        # Enforce `name` at class-definition time on concrete subclasses.
+        # ``ClassVar[str]`` is a static-analysis hint; this guards the runtime
+        # contract so a forgotten declaration fails loudly here rather than
+        # later when the orchestrator tries to read it.
+        # Underscore-prefixed classes are internal abstract bases (e.g.
+        # ``_BiorxivLikePreprintClient``) -- they're allowed to defer the
+        # `name` declaration to their concrete subclasses.
+        if cls.__name__.startswith("_"):
+            return
+        if not getattr(cls, "__abstractmethods__", None) and not hasattr(cls, "name"):
+            raise TypeError(f"{cls.__name__} must declare a `name` class attribute")
+
     @abstractmethod
     async def search(
         self,

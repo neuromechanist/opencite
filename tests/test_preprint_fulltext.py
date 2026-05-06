@@ -185,6 +185,50 @@ class TestWrite:
         assert "arxiv: 10.48550/arXiv.1706.03762" in content
 
 
+class TestRetrieverConstruction:
+    """Default 6-client construction must enter/exit cleanly without network."""
+
+    @pytest.mark.asyncio
+    async def test_default_clients_open_and_close(self, _config: Config):
+        from opencite.preprint_fulltext import PreprintFullTextRetriever
+
+        async with PreprintFullTextRetriever(_config) as r:
+            names = {c.name for c in r._clients}
+        assert names == {"arxiv", "biorxiv", "medrxiv", "osf", "zenodo", "figshare"}
+
+    def test_empty_clients_list_rejected(self, _config: Config):
+        from opencite.preprint_fulltext import PreprintFullTextRetriever
+
+        with pytest.raises(ValueError, match="at least one client"):
+            PreprintFullTextRetriever(_config, clients=[])
+
+    def test_duplicate_client_names_rejected(self, _config: Config):
+        from opencite.clients.osf import OSFClient
+        from opencite.preprint_fulltext import PreprintFullTextRetriever
+
+        with pytest.raises(ValueError, match="must be unique"):
+            PreprintFullTextRetriever(
+                _config, clients=[OSFClient(_config), OSFClient(_config)]
+            )
+
+
+class TestPickClientOSFAttribution:
+    """`osf:psyarxiv`-style attribution must dispatch via the base name."""
+
+    @pytest.mark.asyncio
+    async def test_osf_provider_attribution_with_osf_client(self, _config: Config):
+        from opencite.clients.osf import OSFClient
+        from opencite.preprint_fulltext import PreprintFullTextRetriever
+
+        async with PreprintFullTextRetriever(
+            _config, clients=[OSFClient(_config)]
+        ) as r:
+            paper = Paper(title="x", ids=IDSet(), data_sources={"osf:psyarxiv"})
+            client = r._pick_client(paper)
+        assert client is not None
+        assert client.name == "osf"
+
+
 class TestPickClientNewServers:
     """`_pick_client` routes Phase 3 DOI prefixes to the right client."""
 

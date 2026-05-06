@@ -1,12 +1,12 @@
 ---
 name: opencite
 description: This skill should be used when the user asks to "search for papers", "find citations", "look up a DOI", "get BibTeX", "download PDF", "convert PDF to markdown", "find canonical papers", "convert identifiers", "batch download papers", "configure opencite", or mentions opencite, academic literature search, citation management, or paper retrieval.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # OpenCite CLI Reference
 
-OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, PubMed, arXiv, and bioRxiv/medRxiv, deduplicates them, and outputs formatted results. It also supports PDF retrieval, PDF-to-markdown conversion (included by default), and batch operations.
+OpenCite is a CLI tool and Python library for academic literature search and citation management. It aggregates results from Semantic Scholar, OpenAlex, PubMed, arXiv, bioRxiv, medRxiv, OSF Preprints (PsyArXiv/SocArXiv/EarthArXiv/MetaArXiv), Zenodo, Figshare, CrossRef, and CORE, deduplicates them, and outputs formatted results. It also supports PDF retrieval, HTML full-text shortcuts for arXiv (ar5iv) and bioRxiv (.full), PDF-to-markdown conversion (included by default), and batch operations.
 
 ## Installation
 

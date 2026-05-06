@@ -51,14 +51,26 @@ class PreprintFullTextRetriever:
     ) -> None:
         self.config = config
         # Default fan-out covers all preprint servers shipped through Phase 3.
-        self._clients: list[PreprintClient] = clients or [
-            ArXivClient(config),
-            BioRxivClient(config),
-            MedRxivClient(config),
-            OSFClient(config),
-            ZenodoClient(config),
-            FigshareClient(config),
-        ]
+        if clients is None:
+            self._clients: list[PreprintClient] = [
+                ArXivClient(config),
+                BioRxivClient(config),
+                MedRxivClient(config),
+                OSFClient(config),
+                ZenodoClient(config),
+                FigshareClient(config),
+            ]
+        else:
+            if not clients:
+                raise ValueError(
+                    "PreprintFullTextRetriever requires at least one client"
+                )
+            self._clients = clients
+        names = [c.name for c in self._clients]
+        if len(set(names)) != len(names):
+            raise ValueError(
+                f"PreprintFullTextRetriever client names must be unique: {names!r}"
+            )
         self._by_name: dict[str, PreprintClient] = {c.name: c for c in self._clients}
 
     async def __aenter__(self) -> PreprintFullTextRetriever:
@@ -89,9 +101,12 @@ class PreprintFullTextRetriever:
 
     def _pick_client(self, paper: Paper) -> PreprintClient | None:
         """Return the preprint client that can serve *paper*, or None."""
-        # 1. Direct attribution on the paper.
+        # 1. Direct attribution on the paper. Strip the optional
+        #    ``provider:`` sub-slug used by OSF (``osf:psyarxiv``) so the
+        #    lookup hits the canonical client name.
         for src in paper.data_sources:
-            client = self._by_name.get(src)
+            base = src.split(":", 1)[0]
+            client = self._by_name.get(base)
             if client is not None:
                 return client
 

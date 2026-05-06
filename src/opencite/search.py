@@ -385,6 +385,14 @@ class SearchOrchestrator:
         for r in results:
             if isinstance(r, Paper):
                 paper = merge_papers(paper, r)
+            elif isinstance(r, Exception):
+                # Don't let one source's failure break enrichment, but make
+                # the failure visible in logs (parallel to ``batch_lookup``).
+                logger.warning(
+                    "Enrichment lookup failed for %s: %s",
+                    paper.doi or paper.pmid or "<unknown>",
+                    r,
+                )
 
         return paper
 

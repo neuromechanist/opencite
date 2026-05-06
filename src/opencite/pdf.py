@@ -420,14 +420,28 @@ class PDFRetriever:
                 return md_path
 
         # Try preprint-native HTML (ar5iv / bioRxiv .full) before downloading a PDF.
-        if prefer_preprint_html and paper is not None:
+        if prefer_preprint_html:
             async with PreprintFullTextRetriever(self.config) as pre:
-                md_path = await pre.retrieve(
-                    paper,
-                    output_dir=output_dir,
-                    identifier=identifier,
-                    filename=filename,
-                )
+                if paper is not None:
+                    md_path = await pre.retrieve(
+                        paper,
+                        output_dir=output_dir,
+                        identifier=identifier,
+                        filename=filename,
+                    )
+                else:
+                    # _quick_lookup returned no metadata; fall back to the
+                    # identifier-only path so an arXiv/OSF/Zenodo/Figshare
+                    # DOI still routes to the right preprint client.
+                    logger.debug(
+                        "no paper metadata for %s; trying preprint route by identifier",
+                        identifier,
+                    )
+                    md_path = await pre.retrieve_for_identifier(
+                        identifier,
+                        output_dir=output_dir,
+                        filename=filename,
+                    )
                 if md_path:
                     logger.info(
                         "Retrieved preprint full text (HTML) for %s", identifier
@@ -435,7 +449,7 @@ class PDFRetriever:
                     return md_path
 
         # Fall back to PDF download + conversion
-        logger.debug(
+        logger.info(
             "PMC and preprint HTML full text unavailable for %s, trying PDF",
             identifier,
         )

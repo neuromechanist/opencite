@@ -17,8 +17,11 @@ from typing import TYPE_CHECKING
 
 from opencite.clients.arxiv import ArXivClient
 from opencite.clients.biorxiv import BioRxivClient
+from opencite.clients.figshare import FigshareClient
 from opencite.clients.medrxiv import MedRxivClient
+from opencite.clients.osf import OSFClient
 from opencite.clients.preprint_base import FulltextRoute, PreprintClient
+from opencite.clients.zenodo import ZenodoClient
 from opencite.utils import make_paper_filename
 
 if TYPE_CHECKING:
@@ -47,11 +50,14 @@ class PreprintFullTextRetriever:
         clients: list[PreprintClient] | None = None,
     ) -> None:
         self.config = config
-        # Default fan-out covers Phase 1+2 servers. Phase 3 extends this list.
+        # Default fan-out covers all preprint servers shipped through Phase 3.
         self._clients: list[PreprintClient] = clients or [
             ArXivClient(config),
             BioRxivClient(config),
             MedRxivClient(config),
+            OSFClient(config),
+            ZenodoClient(config),
+            FigshareClient(config),
         ]
         self._by_name: dict[str, PreprintClient] = {c.name: c for c in self._clients}
 
@@ -102,6 +108,12 @@ class PreprintFullTextRetriever:
             return None
         if doi.startswith("10.48550/arxiv."):
             return self._by_name.get("arxiv")
+        if OSFClient.is_osf_doi(doi):
+            return self._by_name.get("osf")
+        if doi.startswith("10.5281/zenodo."):
+            return self._by_name.get("zenodo")
+        if doi.startswith("10.6084/m9.figshare."):
+            return self._by_name.get("figshare")
         if doi.startswith("10.1101/"):
             # bioRxiv first; medRxiv as fallback. Both will return None for
             # the wrong server, so the orchestrator above us would have to

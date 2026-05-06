@@ -10,10 +10,13 @@ from opencite.clients.arxiv import ArXivClient
 from opencite.clients.biorxiv import BioRxivClient
 from opencite.clients.core import COREClient
 from opencite.clients.crossref import CrossRefClient
+from opencite.clients.figshare import FigshareClient
 from opencite.clients.medrxiv import MedRxivClient
 from opencite.clients.openalex import OpenAlexClient
+from opencite.clients.osf import OSFClient
 from opencite.clients.pubmed import PubMedClient
 from opencite.clients.semantic_scholar import SemanticScholarClient
+from opencite.clients.zenodo import ZenodoClient
 from opencite.dedup import deduplicate
 from opencite.models import IDType, Paper, SearchResult, parse_identifier
 
@@ -29,6 +32,9 @@ ALL_SOURCES = (
     "arxiv",
     "biorxiv",
     "medrxiv",
+    "osf",
+    "zenodo",
+    "figshare",
     "crossref",
     "core",
 )
@@ -53,6 +59,9 @@ class SearchOrchestrator:
         self._arxiv = ArXivClient(config)
         self._biorxiv = BioRxivClient(config)
         self._medrxiv = MedRxivClient(config)
+        self._osf = OSFClient(config)
+        self._zenodo = ZenodoClient(config)
+        self._figshare = FigshareClient(config)
         self._crossref = CrossRefClient(config)
         self._core = COREClient(config)
 
@@ -63,6 +72,9 @@ class SearchOrchestrator:
         await self._arxiv.__aenter__()
         await self._biorxiv.__aenter__()
         await self._medrxiv.__aenter__()
+        await self._osf.__aenter__()
+        await self._zenodo.__aenter__()
+        await self._figshare.__aenter__()
         await self._crossref.__aenter__()
         await self._core.__aenter__()
         return self
@@ -74,6 +86,9 @@ class SearchOrchestrator:
         await self._arxiv.__aexit__()
         await self._biorxiv.__aexit__()
         await self._medrxiv.__aexit__()
+        await self._osf.__aexit__()
+        await self._zenodo.__aexit__()
+        await self._figshare.__aexit__()
         await self._crossref.__aexit__()
         await self._core.__aexit__()
 
@@ -119,6 +134,16 @@ class SearchOrchestrator:
         if "medrxiv" in sources:
             tasks["medrxiv"] = asyncio.create_task(
                 self._search_medrxiv(query, max_results)
+            )
+        if "osf" in sources:
+            tasks["osf"] = asyncio.create_task(self._search_osf(query, max_results))
+        if "zenodo" in sources:
+            tasks["zenodo"] = asyncio.create_task(
+                self._search_zenodo(query, max_results)
+            )
+        if "figshare" in sources:
+            tasks["figshare"] = asyncio.create_task(
+                self._search_figshare(query, max_results)
             )
         if "crossref" in sources:
             tasks["crossref"] = asyncio.create_task(
@@ -234,6 +259,15 @@ class SearchOrchestrator:
     async def _search_medrxiv(self, query: str, max_results: int) -> list[Paper]:
         return await self._medrxiv.search(query, max_results=max_results)
 
+    async def _search_osf(self, query: str, max_results: int) -> list[Paper]:
+        return await self._osf.search(query, max_results=max_results)
+
+    async def _search_zenodo(self, query: str, max_results: int) -> list[Paper]:
+        return await self._zenodo.search(query, max_results=max_results)
+
+    async def _search_figshare(self, query: str, max_results: int) -> list[Paper]:
+        return await self._figshare.search(query, max_results=max_results)
+
     async def _search_crossref(
         self,
         query: str,
@@ -317,6 +351,23 @@ class SearchOrchestrator:
                 and "arxiv" not in paper.data_sources
             ):
                 tasks.append(asyncio.create_task(self._arxiv.lookup_doi(paper.doi)))
+            # OSF Preprints (multi-prefix coverage: PsyArXiv, SocArXiv, ...).
+            if OSFClient.is_osf_doi(paper.doi) and not any(
+                s == "osf" or s.startswith("osf:") for s in paper.data_sources
+            ):
+                tasks.append(asyncio.create_task(self._osf.lookup_doi(paper.doi)))
+            # Zenodo
+            if (
+                paper.doi.lower().startswith("10.5281/zenodo.")
+                and "zenodo" not in paper.data_sources
+            ):
+                tasks.append(asyncio.create_task(self._zenodo.lookup_doi(paper.doi)))
+            # Figshare
+            if (
+                paper.doi.lower().startswith("10.6084/m9.figshare.")
+                and "figshare" not in paper.data_sources
+            ):
+                tasks.append(asyncio.create_task(self._figshare.lookup_doi(paper.doi)))
         elif paper.pmid:
             if "openalex" not in paper.data_sources:
                 tasks.append(

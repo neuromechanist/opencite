@@ -35,7 +35,7 @@ opencite pdf 10.1038/nature12345 -o paper.pdf --convert
 > **Claude Code plugin:** Type `/plugin`, select "Add marketplace", enter `neuromechanist/opencite`, and restart. Then use `/opencite` or ask Claude directly.
 
 > [!TIP]
-> **PDF conversion** is included by default. If `MISTRAL_API_KEY` is set, markit-mistral is used (better for math/complex layouts); otherwise markitdown (free, local).
+> **PDF conversion** requires `pip install 'opencite[pdf]'`. If `MISTRAL_API_KEY` is set, markit-mistral is used (better for math/complex layouts); otherwise markitdown (free, local).
 
 ## Commands
 
@@ -137,16 +137,20 @@ Use `-o`/`--output FILE` to write to a file instead of stdout.
 
 ```bash
 # uv (recommended)
-uv pip install opencite
+uv pip install opencite              # core (no PDF-to-markdown conversion)
+uv pip install 'opencite[pdf]'       # with PDF download and markdown conversion
 
 # pip
-pip install opencite
+pip install opencite                 # core (no PDF-to-markdown conversion)
+pip install 'opencite[pdf]'          # with PDF download and markdown conversion
 
 # uvx (no install needed, runs from cache)
 uvx opencite --version
 ```
 
-PDF conversion support (markitdown and markit-mistral) is included by default.
+PDF conversion support (markitdown and markit-mistral) is available via the `[pdf]` extra.
+Install `opencite[pdf]` when you need `opencite pdf`, `opencite convert`, or
+`opencite batch-fetch --convert`.
 
 For development:
 

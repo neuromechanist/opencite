@@ -85,7 +85,7 @@ SAMPLE_WORK = {
     ],
     "cited_by_count": 15000,
     "is_retracted": False,
-    "open_access": {"is_oa": True},
+    "open_access": {"is_oa": True, "oa_status": "gold"},
     "topics": [
         {"display_name": "Protein Structure"},
         {"display_name": "Machine Learning"},
@@ -186,6 +186,26 @@ class TestParseWork:
         client = _make_client()
         paper = client._parse_work(SAMPLE_WORK)
         assert paper.url == "https://doi.org/10.1038/s41586-021-03819-2"
+
+    def test_oa_status_parsed_from_open_access(self):
+        client = _make_client()
+        paper = client._parse_work(SAMPLE_WORK)
+        assert paper.oa_status == "gold"
+
+    def test_oa_status_defaults_to_empty_when_missing(self):
+        """A work without the oa_status key (older payload) yields ""."""
+        client = _make_client()
+        work = {**SAMPLE_WORK, "open_access": {"is_oa": True}}
+        paper = client._parse_work(work)
+        assert paper.oa_status == ""
+
+    def test_oa_status_when_open_access_is_null(self):
+        """OpenAlex returns null for open_access on some records."""
+        client = _make_client()
+        work = {**SAMPLE_WORK, "open_access": None}
+        paper = client._parse_work(work)
+        assert paper.oa_status == ""
+        assert paper.is_oa is False
 
     def test_minimal_work(self):
         """Parse a work with minimal fields."""

@@ -61,6 +61,18 @@ class TestJsonFormatterSurfacesOaStatus:
         assert location["version"] == "publishedVersion"
         assert location["is_oa"] is True
 
+    def test_pdf_location_keys_present_even_when_empty(self):
+        """Downstream consumers parse license/version unconditionally;
+        the keys must always be present even when the underlying value is
+        empty so a missing-key check isn't mistaken for license-allowed.
+        """
+        loc = PDFLocation(url="https://example.com/x.pdf", source="openalex")
+        paper = _paper(pdf_locations=[loc])
+        out = json.loads(JsonFormatter().format_single(paper, verbose=True))
+        location = out["pdf_locations"][0]
+        assert location["license"] == ""
+        assert location["version"] == ""
+
 
 class TestCsvFormatterSurfacesOaStatus:
     def test_oa_status_column_present(self):

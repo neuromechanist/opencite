@@ -47,16 +47,56 @@ class TestCitationExplorerDisabledSources:
 
 
 class TestSearchOrchestratorRespectsDisabledSources:
-    def test_disabled_sources_filtered_from_default_search(self):
-        # Build the orchestrator and inspect the filter logic by
-        # mocking out per-client search; here we just verify the filter
-        # math via canonicalize behavior used by SearchOrchestrator.
+    def test_disabled_sources_round_trips_through_orchestrator(self):
         config = Config(disabled_sources=["figshare", "core"])
         orchestrator = SearchOrchestrator(config)
-        # disabled_sources is a config attribute consumed at .search() time;
-        # verify it round-trips through the orchestrator's config.
         assert "figshare" in orchestrator.config.disabled_sources
         assert "core" in orchestrator.config.disabled_sources
+
+    @pytest.mark.asyncio
+    async def test_disabled_sources_skip_real_client_dispatch(self):
+        """End-to-end: a disabled source's `search` method must not be awaited."""
+        from unittest.mock import AsyncMock
+
+        orchestrator = SearchOrchestrator(
+            Config(disabled_sources=["s2", "figshare", "core"])
+        )
+        for attr in (
+            "_openalex",
+            "_s2",
+            "_pubmed",
+            "_arxiv",
+            "_biorxiv",
+            "_medrxiv",
+            "_osf",
+            "_zenodo",
+            "_figshare",
+            "_crossref",
+            "_core",
+        ):
+            getattr(orchestrator, attr).search = AsyncMock(return_value=[])
+
+        await orchestrator.search("query")
+
+        orchestrator._s2.search.assert_not_called()
+        orchestrator._figshare.search.assert_not_called()
+        orchestrator._core.search.assert_not_called()
+        orchestrator._openalex.search.assert_awaited_once()
+        orchestrator._arxiv.search.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_disabled_overrides_per_call_sources_arg(self):
+        """Even an explicit `sources=` argument cannot re-enable a disabled source."""
+        from unittest.mock import AsyncMock
+
+        orchestrator = SearchOrchestrator(Config(disabled_sources=["s2"]))
+        orchestrator._s2.search = AsyncMock(return_value=[])
+        orchestrator._openalex.search = AsyncMock(return_value=[])
+
+        await orchestrator.search("query", sources=("openalex", "s2"))
+
+        orchestrator._s2.search.assert_not_called()
+        orchestrator._openalex.search.assert_awaited_once()
 
 
 class TestConfigDisabledSourcesParsing:

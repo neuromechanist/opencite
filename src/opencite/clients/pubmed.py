@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
 from opencite.models import Author, IDSet, Paper, Source
@@ -23,7 +23,13 @@ class PubMedClient(BaseClient):
 
     Uses esearch for keyword queries, efetch for metadata retrieval,
     and elink for citation/reference traversal.
+
+    Shares a process-wide rate limiter with `IDConverterClient` (both hit
+    NCBI eutils) so the 10 req/sec budget with an API key (3 req/sec
+    without) is honored across all callers.
     """
+
+    shared_limiter_key: ClassVar[str | None] = "ncbi_eutils"
 
     def __init__(self, config: Config):
         super().__init__(

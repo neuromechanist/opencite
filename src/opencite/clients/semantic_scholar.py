@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
@@ -58,7 +58,15 @@ CITATION_FIELDS = ",".join(
 
 
 class SemanticScholarClient(BaseClient):
-    """Client for the Semantic Scholar Academic Graph API."""
+    """Client for the Semantic Scholar Academic Graph API.
+
+    Uses a process-wide shared rate limiter (`shared_limiter_key = "s2"`)
+    because S2's free tier caps the entire account at ~1 req/sec even with
+    an API key; multiple parallel `SemanticScholarClient` instances would
+    otherwise multiply requests and trigger 429s.
+    """
+
+    shared_limiter_key: ClassVar[str | None] = "s2"
 
     def __init__(self, config: Config):
         super().__init__(

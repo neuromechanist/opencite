@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
@@ -19,7 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 class RateLimiter:
-    """Token bucket rate limiter for async operations."""
+    """Token bucket rate limiter for async operations.
+
+    The token state (rate, tokens, refill clock) is plain floats and safe
+    to share across event loops. The serializing `asyncio.Lock`, however,
+    binds to whichever event loop first acquires it; when the limiter is
+    re-used from a different loop (e.g. successive pytest-asyncio test
+    functions), the lock is transparently recreated.
+    """
 
     def __init__(self, rate: float, burst: int = 1):
         """
@@ -31,11 +39,19 @@ class RateLimiter:
         self.burst = burst
         self._tokens = float(burst)
         self._last_refill = time.monotonic()
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+        self._lock_loop_id: int | None = None
+
+    def _lock_for_loop(self) -> asyncio.Lock:
+        loop_id = id(asyncio.get_running_loop())
+        if self._lock is None or self._lock_loop_id != loop_id:
+            self._lock = asyncio.Lock()
+            self._lock_loop_id = loop_id
+        return self._lock
 
     async def acquire(self) -> None:
         """Wait until a token is available, then consume one."""
-        async with self._lock:
+        async with self._lock_for_loop():
             now = time.monotonic()
             elapsed = now - self._last_refill
             self._tokens = min(self.burst, self._tokens + elapsed * self.rate)
@@ -55,7 +71,20 @@ class BaseClient(ABC):
 
     Handles HTTP session lifecycle, rate limiting, retries,
     and error normalization.
+
+    Subclasses that should share a single token bucket across every
+    instance in the process (e.g. Semantic Scholar's ~1 req/sec budget)
+    set `shared_limiter_key` to a unique string. The first instance to
+    initialize creates the limiter at the given rate; later instances
+    reuse it regardless of who created them. Subclasses without a key
+    keep per-instance limiters, matching the previous behavior.
     """
+
+    # Per-process registry of shared rate limiters, keyed by `shared_limiter_key`.
+    # Populated lazily by `__init__`. Use `reset_shared_limiters()` for tests.
+    _shared_limiters: ClassVar[dict[str, RateLimiter]] = {}
+    _shared_limiters_lock: ClassVar[threading.Lock] = threading.Lock()
+    shared_limiter_key: ClassVar[str | None] = None
 
     def __init__(
         self,
@@ -68,10 +97,27 @@ class BaseClient(ABC):
     ):
         self.config = config
         self.base_url = base_url
-        self.rate_limiter = RateLimiter(rate_limit, burst)
+        self.rate_limiter = self._resolve_rate_limiter(rate_limit, burst)
         self.timeout = timeout or config.timeout
         self.max_retries = max_retries or config.max_retries
         self._client: httpx.AsyncClient | None = None
+
+    def _resolve_rate_limiter(self, rate_limit: float, burst: int) -> RateLimiter:
+        key = self.shared_limiter_key
+        if key is None:
+            return RateLimiter(rate_limit, burst)
+        with BaseClient._shared_limiters_lock:
+            limiter = BaseClient._shared_limiters.get(key)
+            if limiter is None:
+                limiter = RateLimiter(rate_limit, burst)
+                BaseClient._shared_limiters[key] = limiter
+            return limiter
+
+    @classmethod
+    def reset_shared_limiters(cls) -> None:
+        """Clear the shared limiter registry. Intended for tests."""
+        with BaseClient._shared_limiters_lock:
+            BaseClient._shared_limiters.clear()
 
     async def __aenter__(self) -> BaseClient:
         self._client = httpx.AsyncClient(

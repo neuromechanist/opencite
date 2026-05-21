@@ -32,7 +32,7 @@ opencite pdf 10.1038/nature12345 -o paper.pdf --convert
 ```
 
 > [!NOTE]
-> **Claude Code plugin:** Type `/plugin`, select "Add marketplace", enter `neuromechanist/opencite`, and restart. Then use `/opencite` or ask Claude directly.
+> **AI-agent skill:** The opencite skill ships in [neuromechanist/research-skills](https://github.com/neuromechanist/research-skills) alongside the other research-tooling skills (figures, grant, manuscript, neuroinformatics, presentation, project). It works with Claude Code, Codex / OpenAI, and VS Code GitHub Copilot. For Claude Code, run `/plugin marketplace add neuromechanist/research-skills`, then open `/plugin` and install `opencite` from the research-skills marketplace; see the research-skills README for setup with the other agents.
 
 > [!TIP]
 > **PDF conversion** requires `pip install 'opencite[pdf]'`. If `MISTRAL_API_KEY` is set, markit-mistral is used (better for math/complex layouts); otherwise markitdown (free, local).

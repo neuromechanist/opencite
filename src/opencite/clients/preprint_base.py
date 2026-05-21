@@ -41,7 +41,8 @@ def html_to_markdown(html: str, context: str = "") -> str | None:
         from markitdown import MarkItDown
     except ImportError:
         logger.warning(
-            "markitdown is required for HTML-to-markdown conversion but is not installed%s",
+            "markitdown is required for HTML-to-markdown conversion but is not installed%s. "
+            "Install with: pip install 'opencite[pdf]'",
             ctx,
         )
         return None

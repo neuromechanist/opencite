@@ -149,8 +149,9 @@ uvx opencite --version
 ```
 
 PDF conversion support (markitdown and markit-mistral) is available via the `[pdf]` extra.
-Install `opencite[pdf]` when you need `opencite pdf`, `opencite convert`, or
-`opencite batch-fetch --convert`.
+Install `opencite[pdf]` when you need `opencite pdf`, `opencite convert`,
+`opencite batch-fetch --convert`, or preprint HTML full-text (arXiv ar5iv,
+bioRxiv/medRxiv `.full` HTML) which also depends on markitdown.
 
 For development:
 

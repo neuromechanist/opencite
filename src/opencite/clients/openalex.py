@@ -303,9 +303,15 @@ class OpenAlexClient(BaseClient):
             if grant:
                 grants.append(grant)
 
-        # OA status
+        # OA status. OpenAlex distinguishes gold / hybrid / green / bronze /
+        # closed / diamond; `is_oa` collapses all of these to a boolean and
+        # doesn't communicate the redistribution implications (bronze, for
+        # example, is free-to-read but not reusably licensed). Keep `is_oa`
+        # for backward compatibility and surface the enum separately as
+        # `oa_status` so downstream consumers can decide for themselves.
         oa_obj = work.get("open_access") or {}
         is_oa = oa_obj.get("is_oa", False) or False
+        oa_status = oa_obj.get("oa_status") or ""
 
         return Paper(
             title=work.get("title", ""),
@@ -323,6 +329,7 @@ class OpenAlexClient(BaseClient):
             url=doi_raw if doi_raw else work.get("id", ""),
             pdf_locations=pdf_locations,
             is_oa=is_oa,
+            oa_status=oa_status,
             data_sources={"openalex"},
             grants=grants,
         )

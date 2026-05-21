@@ -210,6 +210,33 @@ wiley_tdm = "your_token"
 springer = "your_key"
 ```
 
+## Redistribution and licensing
+
+OpenCite retrieves PDFs and markdown for you and reports what it found, but it
+does not enforce a redistribution policy. The publication-vs-reuse decision
+belongs to the caller.
+
+What we report:
+
+- **`Paper.oa_status`** -- the OpenAlex Open Access status (`gold`, `hybrid`,
+  `green`, `bronze`, `closed`, `diamond`, or empty when unknown). `is_oa = True`
+  collapses all open categories together; `oa_status` distinguishes them.
+  Notably, **bronze** is free-to-read but not openly licensed.
+- **`PDFLocation.license` and `version`** -- per-source license string
+  (`cc-by`, `cc-by-nc`, etc.) and version (`publishedVersion`,
+  `acceptedVersion`, `submittedVersion`) where the upstream API surfaces them.
+  Available in `opencite lookup --format json --verbose` and `opencite search`.
+- **`<pdf>.license.json`** -- a sidecar written next to every downloaded PDF
+  containing `{url, source, license, version, oa_status, publisher_tdm, doi,
+  retrieved_at}`. A later "is this PDF safe to commit?" check can run by
+  scanning sidecars without re-querying the original Paper.
+
+If your pipeline publishes its artifacts (e.g. commits PDFs/markdown to a
+public repo), be deliberate about which sources you enable. Publisher TDM
+tokens (Elsevier, Wiley, Springer) almost universally prohibit redistribution
+of the bytes they return; the sidecar's `publisher_tdm: true` flag is a
+machine-readable signal for downstream scanners.
+
 ## License
 
 MIT

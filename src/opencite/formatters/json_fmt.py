@@ -47,6 +47,7 @@ def _paper_to_dict(paper: Paper, verbose: bool = False) -> dict:
         "citation_count": paper.citation_count,
         "url": paper.url,
         "is_oa": paper.is_oa,
+        "oa_status": paper.oa_status,
         "data_sources": sorted(paper.data_sources),
     }
 
@@ -69,8 +70,16 @@ def _paper_to_dict(paper: Paper, verbose: bool = False) -> dict:
         if paper.mesh_terms:
             d["mesh_terms"] = paper.mesh_terms
         if paper.pdf_locations:
+            # Surface `license` and `version` per location so downstream
+            # consumers can make redistribution decisions without re-querying.
             d["pdf_locations"] = [
-                {"url": loc.url, "source": loc.source, "is_oa": loc.is_oa}
+                {
+                    "url": loc.url,
+                    "source": loc.source,
+                    "is_oa": loc.is_oa,
+                    "version": loc.version,
+                    "license": loc.license,
+                }
                 for loc in paper.pdf_locations
             ]
         if paper.grants:

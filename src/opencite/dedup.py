@@ -141,6 +141,7 @@ def merge_papers(existing: Paper, new: Paper) -> Paper:
         source_venue=source_venue,
         data_sources=merged_sources,
         is_oa=existing.is_oa or new.is_oa,
+        oa_status=existing.oa_status or new.oa_status,
         is_retracted=existing.is_retracted or new.is_retracted,
         year=existing.year or new.year,
         publication_date=existing.publication_date or new.publication_date,

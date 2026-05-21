@@ -150,6 +150,15 @@ class Paper:
     url: str = ""
     pdf_locations: list[PDFLocation] = field(default_factory=list)
     is_oa: bool = False
+    # OpenAlex-style enum: "gold", "hybrid", "green", "bronze", "closed",
+    # "diamond", or "" when unknown. `is_oa = True` collapses gold/hybrid/
+    # green/bronze together, but the redistribution implications differ
+    # (e.g. bronze is free-to-read but not openly licensed). Consumers
+    # publishing artifacts based on PDFs we retrieve should consult this
+    # field rather than `is_oa` alone. opencite reports `oa_status` but
+    # does not filter on it -- the publication-vs-redistribution decision
+    # belongs to the caller.
+    oa_status: str = ""
 
     # Provenance
     data_sources: set[str] = field(default_factory=set)

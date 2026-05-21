@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,7 +12,7 @@ import httpx
 
 from opencite.clients.id_converter import IDConverterClient
 from opencite.clients.unpaywall import UnpaywallClient
-from opencite.models import IDType, Paper, parse_identifier
+from opencite.models import IDType, Paper, PDFLocation, parse_identifier
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -153,7 +155,15 @@ class PDFRetriever:
             logger.debug("Trying PDF URL: %s", url)
             result = await self._try_download(url, dest, failures)
             if result:
-                return result
+                pdf_path, final_url = result
+                # Pass both URLs: the original is what's stored in
+                # paper.pdf_locations so it's used for the metadata match;
+                # the final post-redirect URL is what the bytes actually
+                # came from and is used for source inference. This matters
+                # for doi.org content negotiation that resolves through a
+                # publisher's TDM endpoint.
+                _write_license_sidecar(pdf_path, url, final_url, paper)
+                return pdf_path
 
         # Report failures
         self._report_failures(identifier, failures, paper)
@@ -254,8 +264,14 @@ class PDFRetriever:
         url: str,
         dest: Path,
         failures: list[tuple[str, str]],
-    ) -> Path | None:
-        """Try downloading a PDF from a URL."""
+    ) -> tuple[Path, str] | None:
+        """Try downloading a PDF from a URL.
+
+        Returns `(dest, final_url)` on success where `final_url` is the
+        URL the bytes actually came from after redirects (used by the
+        license sidecar so that doi.org redirects to a publisher TDM
+        endpoint are classified by their resolved source, not by `doi`).
+        """
         headers: dict[str, str] = {}
 
         # Add publisher auth headers
@@ -289,7 +305,7 @@ class PDFRetriever:
 
                 dest.write_bytes(resp.content)
                 logger.info("Downloaded PDF to %s (%d bytes)", dest, len(resp.content))
-                return dest
+                return dest, str(resp.url)
 
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
@@ -485,3 +501,125 @@ class PDFRetriever:
         from opencite.utils import make_paper_filename
 
         return make_paper_filename(paper, identifier)
+
+
+def _infer_source_from_url(url: str) -> str:
+    """Best-effort source label for a downloaded URL.
+
+    Used only for the license sidecar when the URL didn't come from a
+    PDFLocation we already have provenance for (e.g. publisher-API or
+    direct preprint URLs we synthesize in `_collect_urls`).
+    """
+    if "api.elsevier.com" in url:
+        return "publisher:elsevier"
+    if "api.wiley.com" in url:
+        return "publisher:wiley"
+    if "api.springernature.com" in url:
+        return "publisher:springer"
+    if "arxiv.org" in url:
+        return "arxiv"
+    if "ncbi.nlm.nih.gov/pmc" in url or "pmc.ncbi.nlm.nih.gov" in url:
+        return "pmc"
+    if "biorxiv.org" in url:
+        return "biorxiv"
+    if "medrxiv.org" in url:
+        return "medrxiv"
+    if "doi.org" in url:
+        return "doi"
+    return "unknown"
+
+
+def _write_license_sidecar(
+    pdf_path: Path,
+    url: str,
+    final_url: str | None,
+    paper: Paper | None,
+) -> None:
+    """Write `<pdf>.license.json` next to a downloaded PDF.
+
+    Captures the URL that produced the bytes, the inferred source, and
+    whatever license/version metadata the upstream API surfaced, so a
+    later "is this PDF safe to share?" check doesn't need the original
+    Paper object. Publisher-API URLs (Elsevier/Wiley/Springer TDM tokens)
+    are explicitly flagged because their terms typically prohibit
+    redistribution of the bytes; the caller decides what to do with that.
+
+    Args:
+        pdf_path: Path of the downloaded PDF (sidecar lives next to it).
+        url: Original URL attempted (matched against `paper.pdf_locations`
+            since that's the string stored there).
+        final_url: Post-redirect URL the bytes actually came from. Used
+            for source inference so a doi.org redirect that resolves to a
+            publisher TDM endpoint is classified by its true source. Falls
+            back to `url` when None.
+        paper: Source paper metadata; may be None when downloaded
+            without prior enrichment.
+
+    Failure to write the sidecar is logged but never raises -- the PDF
+    itself is the primary artifact. Catches OSError (filesystem) and
+    TypeError/ValueError (json.dumps on an unexpected payload shape).
+    """
+    try:
+        inference_url = final_url or url
+        # Match against the URL we put in paper.pdf_locations (the pre-redirect
+        # one); if no match, infer from the final URL so doi.org redirects
+        # are classified by where the bytes actually came from.
+        matched: PDFLocation | None = None
+        if paper is not None:
+            for loc in paper.pdf_locations:
+                if loc.url == url:
+                    matched = loc
+                    break
+
+        if matched is not None:
+            source = matched.source
+            license_value = matched.license
+            version = matched.version
+            bytes_is_oa = matched.is_oa
+        else:
+            source = _infer_source_from_url(inference_url)
+            license_value = ""
+            version = ""
+            # Don't pull is_oa from paper.is_oa here: the metadata is about
+            # the bytes we just downloaded, not the paper-in-general. A
+            # publisher-TDM endpoint returning the published version of an
+            # OA paper is still not OA-redistributable bytes.
+            bytes_is_oa = False
+            logger.debug(
+                "no PDFLocation match for downloaded URL %s; inferring source %s",
+                inference_url,
+                source,
+            )
+
+        publisher_tdm = source.startswith("publisher:")
+        # publisher_tdm bytes are never OA-redistributable regardless of
+        # what `paper.pdf_locations` claimed, so override defensively.
+        if publisher_tdm:
+            bytes_is_oa = False
+
+        sidecar = {
+            "pdf_filename": pdf_path.name,
+            "url": url,
+            "final_url": final_url or url,
+            "source": source,
+            "license": license_value,
+            "version": version,
+            "is_oa": bytes_is_oa,
+            "oa_status": paper.oa_status if paper is not None else "",
+            "publisher_tdm": publisher_tdm,
+            "doi": paper.doi if paper is not None else "",
+            "retrieved_at": datetime.now(UTC)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
+            "note": (
+                "opencite reports licensing information but does not enforce "
+                "redistribution policy. Consult the publisher's license and "
+                "your local policy before re-sharing the downloaded artifact."
+            ),
+        }
+        sidecar_path = pdf_path.with_suffix(pdf_path.suffix + ".license.json")
+        sidecar_path.write_text(json.dumps(sidecar, indent=2))
+    except (OSError, TypeError, ValueError) as e:
+        logger.warning(
+            "Failed to write license sidecar for %s: %s", pdf_path, e, exc_info=True
+        )

@@ -22,6 +22,7 @@ _FIELDS = [
     "citation_count",
     "url",
     "is_oa",
+    "oa_status",
     "data_sources",
 ]
 
@@ -63,5 +64,6 @@ def _paper_to_row(paper: Paper) -> dict[str, str]:
         "citation_count": str(paper.citation_count),
         "url": paper.url,
         "is_oa": str(paper.is_oa),
+        "oa_status": paper.oa_status,
         "data_sources": ", ".join(sorted(paper.data_sources)),
     }

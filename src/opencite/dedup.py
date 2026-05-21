@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,8 @@ from opencite.utils import normalize_title, titles_similar
 
 if TYPE_CHECKING:
     from opencite.models import Paper
+
+logger = logging.getLogger(__name__)
 
 
 def deduplicate(papers: list[Paper]) -> list[Paper]:
@@ -125,6 +128,18 @@ def merge_papers(existing: Paper, new: Paper) -> Paper:
     # BibTeX: prefer existing if present
     bibtex = existing._bibtex or new._bibtex
 
+    # oa_status precedence: existing wins (consistent with sibling fields).
+    # When two sources legitimately disagree (e.g. preprint copy is `green`,
+    # published copy is `gold`) the existing-wins choice is arbitrary -- log
+    # it so an operator auditing a surprising classification has a breadcrumb.
+    if existing.oa_status and new.oa_status and existing.oa_status != new.oa_status:
+        logger.debug(
+            "oa_status mismatch during merge: keeping %r over %r for %r",
+            existing.oa_status,
+            new.oa_status,
+            existing.doi or existing.title,
+        )
+
     return replace(
         existing,
         ids=merged_ids,
@@ -141,6 +156,7 @@ def merge_papers(existing: Paper, new: Paper) -> Paper:
         source_venue=source_venue,
         data_sources=merged_sources,
         is_oa=existing.is_oa or new.is_oa,
+        oa_status=existing.oa_status or new.oa_status,
         is_retracted=existing.is_retracted or new.is_retracted,
         year=existing.year or new.year,
         publication_date=existing.publication_date or new.publication_date,

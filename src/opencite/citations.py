@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 from opencite.clients.openalex import OpenAlexClient
 from opencite.clients.semantic_scholar import SemanticScholarClient
 from opencite.dedup import deduplicate
-from opencite.models import CitationResult, IDType, Paper, parse_identifier
+from opencite.models import CitationResult, IDSet, IDType, Paper, parse_identifier
+from opencite.sources import is_source_enabled
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 class CitationExplorer:
     """Explores citation graphs and finds canonical papers.
+
+    Honors `config.disabled_sources`: a disabled source's client is never
+    constructed, so its rate budget isn't touched and its async failures
+    can't slow down the parallel gather. Disabling both `openalex` and
+    `s2` leaves nothing to query and raises at construction time.
 
     Usage::
 
@@ -30,17 +36,34 @@ class CitationExplorer:
 
     def __init__(self, config: Config):
         self.config = config
-        self._openalex = OpenAlexClient(config)
-        self._s2 = SemanticScholarClient(config)
+        self._openalex: OpenAlexClient | None = (
+            OpenAlexClient(config)
+            if is_source_enabled("openalex", config.disabled_sources)
+            else None
+        )
+        self._s2: SemanticScholarClient | None = (
+            SemanticScholarClient(config)
+            if is_source_enabled("s2", config.disabled_sources)
+            else None
+        )
+        if self._openalex is None and self._s2 is None:
+            raise ValueError(
+                "CitationExplorer needs at least one of `openalex` or `s2`; "
+                "both are listed in config.disabled_sources."
+            )
 
     async def __aenter__(self) -> CitationExplorer:
-        await self._openalex.__aenter__()
-        await self._s2.__aenter__()
+        if self._openalex is not None:
+            await self._openalex.__aenter__()
+        if self._s2 is not None:
+            await self._s2.__aenter__()
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        await self._openalex.__aexit__()
-        await self._s2.__aexit__()
+        if self._openalex is not None:
+            await self._openalex.__aexit__()
+        if self._s2 is not None:
+            await self._s2.__aexit__()
 
     async def citing_papers(
         self,
@@ -64,7 +87,7 @@ class CitationExplorer:
         # Get citing papers from available sources
         tasks: list[asyncio.Task[list[Paper]]] = []
 
-        if seed.ids.openalex_id:
+        if self._openalex is not None and seed.ids.openalex_id:
             tasks.append(
                 asyncio.create_task(
                     self._openalex.citing_papers(
@@ -72,18 +95,23 @@ class CitationExplorer:
                     )
                 )
             )
-        if seed.ids.s2_id:
-            tasks.append(
-                asyncio.create_task(
-                    self._s2.citing_papers(seed.ids.s2_id, max_results=max_results)
+        if self._s2 is not None:
+            if seed.ids.s2_id:
+                tasks.append(
+                    asyncio.create_task(
+                        self._s2.citing_papers(
+                            seed.ids.s2_id, max_results=max_results
+                        )
+                    )
                 )
-            )
-        elif seed.doi:
-            tasks.append(
-                asyncio.create_task(
-                    self._s2.citing_papers(f"DOI:{seed.doi}", max_results=max_results)
+            elif seed.doi:
+                tasks.append(
+                    asyncio.create_task(
+                        self._s2.citing_papers(
+                            f"DOI:{seed.doi}", max_results=max_results
+                        )
+                    )
                 )
-            )
 
         all_papers = await _gather_papers(tasks)
 
@@ -120,7 +148,7 @@ class CitationExplorer:
 
         tasks: list[asyncio.Task[list[Paper]]] = []
 
-        if seed.ids.openalex_id:
+        if self._openalex is not None and seed.ids.openalex_id:
             tasks.append(
                 asyncio.create_task(
                     self._openalex.references(
@@ -128,18 +156,21 @@ class CitationExplorer:
                     )
                 )
             )
-        if seed.ids.s2_id:
-            tasks.append(
-                asyncio.create_task(
-                    self._s2.references(seed.ids.s2_id, max_results=max_results)
+        if self._s2 is not None:
+            if seed.ids.s2_id:
+                tasks.append(
+                    asyncio.create_task(
+                        self._s2.references(seed.ids.s2_id, max_results=max_results)
+                    )
                 )
-            )
-        elif seed.doi:
-            tasks.append(
-                asyncio.create_task(
-                    self._s2.references(f"DOI:{seed.doi}", max_results=max_results)
+            elif seed.doi:
+                tasks.append(
+                    asyncio.create_task(
+                        self._s2.references(
+                            f"DOI:{seed.doi}", max_results=max_results
+                        )
+                    )
                 )
-            )
 
         all_papers = await _gather_papers(tasks)
         unique = deduplicate(all_papers)
@@ -161,8 +192,15 @@ class CitationExplorer:
     ) -> list[Paper]:
         """Find the most-cited papers in a field.
 
-        Uses OpenAlex sorted by citation count descending.
+        Uses OpenAlex sorted by citation count descending. Raises
+        `RuntimeError` if `openalex` is disabled, since no other source
+        in the explorer can substitute.
         """
+        if self._openalex is None:
+            raise RuntimeError(
+                "canonical_papers requires `openalex`, which is disabled in "
+                "config.disabled_sources."
+            )
         papers = await self._openalex.canonical_search(
             query,
             max_results=max_results,
@@ -172,47 +210,49 @@ class CitationExplorer:
         return papers
 
     async def _lookup_seed(self, id_type: IDType, id_value: str) -> Paper | None:
-        """Look up the seed paper to get IDs for citation queries."""
-        if id_type == IDType.DOI:
-            # Try S2 first for fast lookup + S2 ID
-            paper = await self._s2.lookup(f"DOI:{id_value}")
-            if paper:
-                # Also get OpenAlex ID
-                oa_paper = await self._openalex.lookup_doi(id_value)
-                if oa_paper:
-                    from opencite.dedup import merge_papers
+        """Look up the seed paper to get IDs for citation queries.
 
-                    paper = merge_papers(paper, oa_paper)
+        When a source is disabled, fall back to whichever client is still
+        constructed; if neither can serve the ID type, return None.
+        """
+        from opencite.dedup import merge_papers
+
+        s2_lookup = self._s2.lookup if self._s2 is not None else None
+        openalex_doi = self._openalex.lookup_doi if self._openalex is not None else None
+
+        if id_type == IDType.DOI:
+            paper = await s2_lookup(f"DOI:{id_value}") if s2_lookup else None
+            if paper:
+                if openalex_doi:
+                    oa_paper = await openalex_doi(id_value)
+                    if oa_paper:
+                        paper = merge_papers(paper, oa_paper)
                 return paper
-            return await self._openalex.lookup_doi(id_value)
+            return await openalex_doi(id_value) if openalex_doi else None
 
         if id_type == IDType.PMID:
-            paper = await self._s2.lookup(f"PMID:{id_value}")
-            if paper and paper.doi:
-                oa_paper = await self._openalex.lookup_doi(paper.doi)
+            paper = await s2_lookup(f"PMID:{id_value}") if s2_lookup else None
+            if paper and paper.doi and openalex_doi:
+                oa_paper = await openalex_doi(paper.doi)
                 if oa_paper:
-                    from opencite.dedup import merge_papers
-
                     paper = merge_papers(paper, oa_paper)
             return paper
 
         if id_type == IDType.ARXIV:
-            return await self._s2.lookup(f"ARXIV:{id_value}")
+            return await s2_lookup(f"ARXIV:{id_value}") if s2_lookup else None
 
         if id_type == IDType.S2:
-            return await self._s2.lookup(id_value)
+            return await s2_lookup(id_value) if s2_lookup else None
 
         if id_type == IDType.OPENALEX:
-            return await self._openalex.lookup_doi(id_value)
+            return await openalex_doi(id_value) if openalex_doi else None
 
         return None
 
 
-def _make_ids(id_type: IDType, id_value: str) -> object:
+def _make_ids(id_type: IDType, id_value: str) -> IDSet:
     """Create an IDSet with the given ID type populated."""
-    from opencite.models import IDSet
-
-    kwargs = {
+    field_by_type = {
         IDType.DOI: "doi",
         IDType.PMID: "pmid",
         IDType.PMCID: "pmcid",
@@ -220,7 +260,7 @@ def _make_ids(id_type: IDType, id_value: str) -> object:
         IDType.S2: "s2_id",
         IDType.ARXIV: "arxiv_id",
     }
-    field_name = kwargs.get(id_type, "doi")
+    field_name = field_by_type.get(id_type, "doi")
     return IDSet(**{field_name: id_value})
 
 

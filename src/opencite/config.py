@@ -14,8 +14,9 @@ from __future__ import annotations
 import logging
 import os
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ contact_email = ""
 timeout = 30.0
 max_retries = 3
 log_level = "WARNING"
+# Comma-separated list of sources to skip entirely. Useful when a source's
+# rate budget (e.g. Semantic Scholar's ~1 req/s) is the bottleneck and you
+# don't need its contribution.
+# disabled_sources = "s2,figshare"
 
 [defaults]
 max_results = 20
@@ -70,7 +75,13 @@ _TOML_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("defaults", "max_results"): ("default_max_results", "OPENCITE_MAX_RESULTS"),
     ("defaults", "format"): ("default_format", "OPENCITE_FORMAT"),
     ("defaults", "converter"): ("default_converter", "OPENCITE_CONVERTER"),
+    ("settings", "disabled_sources"): ("disabled_sources", "OPENCITE_DISABLED_SOURCES"),
 }
+
+
+def _split_csv(value: str) -> list[str]:
+    """Split a comma-separated string into a stripped, lowercased list."""
+    return [v.strip().lower() for v in value.split(",") if v.strip()]
 
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
@@ -198,6 +209,13 @@ class Config:
     # Logging
     log_level: str = "WARNING"
 
+    # Sources the orchestrator/explorer should skip entirely. Accepts the
+    # canonical source keys used by SearchOrchestrator.ALL_SOURCES
+    # ("openalex", "s2", "pubmed", "arxiv", ...). Set via Python, TOML
+    # ([settings] disabled_sources = "s2,figshare"), or the
+    # OPENCITE_DISABLED_SOURCES env var (comma-separated).
+    disabled_sources: list[str] = field(default_factory=list)
+
     @classmethod
     def from_env(cls, config_path: Path | None = None) -> Config:
         """Create config from TOML, .env files, and environment variables.
@@ -208,7 +226,7 @@ class Config:
         3. .env files (~/.opencite/.env, then CWD .env)
         4. Environment variables
         """
-        kwargs: dict[str, str | float | int] = {}
+        kwargs: dict[str, Any] = {}
 
         # Layer 1: TOML config
         toml_values = _load_toml(config_path)
@@ -233,13 +251,15 @@ class Config:
 
         # Type-coerce values to match field types
         field_types = {f.name: f.type for f in fields(cls)}
-        coerced: dict[str, str | float | int] = {}
+        coerced: dict[str, Any] = {}
         for key, val in kwargs.items():
             expected_type = field_types.get(key, "str")
             if expected_type == "float" and not isinstance(val, float):
                 coerced[key] = float(val)
             elif expected_type == "int" and not isinstance(val, int):
                 coerced[key] = int(val)
+            elif expected_type == "list[str]" and isinstance(val, str):
+                coerced[key] = _split_csv(val)
             else:
                 coerced[key] = val
 

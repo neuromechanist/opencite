@@ -19,6 +19,7 @@ from opencite.clients.semantic_scholar import SemanticScholarClient
 from opencite.clients.zenodo import ZenodoClient
 from opencite.dedup import deduplicate
 from opencite.models import IDType, Paper, SearchResult, parse_identifier
+from opencite.sources import canonicalize
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -108,6 +109,12 @@ class SearchOrchestrator:
         """
         if sources is None:
             sources = ALL_SOURCES
+        # Honor disabled_sources as a baseline filter that can't be
+        # overridden by the per-call `sources=` argument. Callers who
+        # really want a disabled source can drop it from the config.
+        disabled = {canonicalize(d) for d in self.config.disabled_sources}
+        if disabled:
+            sources = tuple(s for s in sources if canonicalize(s) not in disabled)
 
         tasks: dict[str, asyncio.Task[list[Paper]]] = {}
 

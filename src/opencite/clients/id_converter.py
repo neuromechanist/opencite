@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
 from opencite.models import IDSet
@@ -22,7 +22,11 @@ class IDConverterClient(BaseClient):
 
     Converts between PMID, PMCID, DOI, and Manuscript IDs.
     Up to 200 IDs per request, but all IDs must be the same type.
+
+    Shares the NCBI eutils rate limiter with `PubMedClient`.
     """
+
+    shared_limiter_key: ClassVar[str | None] = "ncbi_eutils"
 
     def __init__(self, config: Config):
         super().__init__(

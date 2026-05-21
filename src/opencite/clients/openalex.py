@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
@@ -22,7 +22,12 @@ class OpenAlexClient(BaseClient):
 
     Uses httpx directly (not pyalex) for consistency with other clients
     and to integrate rate limiting through the BaseClient.
+
+    Shares a process-wide rate limiter so concurrent search and citation
+    callers don't multiply requests past the per-key OpenAlex budget.
     """
+
+    shared_limiter_key: ClassVar[str | None] = "openalex"
 
     def __init__(self, config: Config):
         super().__init__(

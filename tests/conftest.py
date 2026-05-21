@@ -6,6 +6,7 @@ import os
 
 import pytest
 
+from opencite.clients.base import BaseClient
 from opencite.config import Config, _load_all_dotenv
 from opencite.models import Author, IDSet, Paper, Source
 
@@ -14,6 +15,14 @@ from opencite.models import Author, IDSet, Paper, Source
 # at import time, before Config.from_env() would normally run.
 for _key, _value in _load_all_dotenv().items():
     os.environ.setdefault(_key, _value)
+
+
+@pytest.fixture(autouse=True)
+def _reset_shared_rate_limiters() -> None:
+    """Clear the per-process shared limiter registry between tests so
+    rate state and limiter identity from one test don't bleed into the next.
+    """
+    BaseClient.reset_shared_limiters()
 
 
 @pytest.fixture

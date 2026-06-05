@@ -551,6 +551,10 @@ class TestCLIIntegration:
         assert len(result.stdout.strip()) > 0
 
     def test_search_json_format(self):
+        # Restrict to a single fast source: this test exercises the JSON
+        # formatter, not multi-source fan-out. The default "all sources"
+        # search awaits ~11 public APIs sequentially, so a broad term could
+        # blow past the subprocess timeout on a slow upstream.
         result = subprocess.run(
             [
                 sys.executable,
@@ -560,6 +564,8 @@ class TestCLIIntegration:
                 "transformer",
                 "--max",
                 "3",
+                "--source",
+                "openalex",
                 "-f",
                 "json",
             ],

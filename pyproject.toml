@@ -49,8 +49,18 @@ dev = [
 opencite = "opencite.__main__:main"
 
 [project.urls]
+Homepage = "https://neuromechanist.github.io/opencite/"
+Documentation = "https://neuromechanist.github.io/opencite/"
 Repository = "https://github.com/neuromechanist/opencite"
 Issues = "https://github.com/neuromechanist/opencite/issues"
+
+[dependency-groups]
+docs = [
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.27.0",
+    "mkdocs-git-revision-date-localized-plugin>=1.2.0",
+    "ruff>=0.8.0",  # mkdocstrings uses ruff to format separated signatures
+]
 
 [tool.hatch.version]
 path = "src/opencite/__init__.py"

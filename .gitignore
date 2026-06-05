@@ -29,6 +29,9 @@ coverage.xml
 .ruff_cache/
 .mypy_cache/
 
+# Documentation
+site/
+
 # Environment
 .env
 .env.local

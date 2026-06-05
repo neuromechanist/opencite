@@ -1,0 +1,123 @@
+# --- Basic Site Information ---
+site_name: OpenCite
+site_url: https://neuromechanist.github.io/opencite/
+site_description: >-
+  Academic literature search, citation management, and PDF retrieval CLI and
+  Python library. Aggregates Semantic Scholar, OpenAlex, PubMed, arXiv, and more.
+site_author: Seyed Yahya Shirazi
+
+# --- Repository Information ---
+repo_url: https://github.com/neuromechanist/opencite/
+repo_name: neuromechanist/opencite
+edit_uri: edit/main/docs/
+
+# --- Theme Configuration (Material for MkDocs) ---
+theme:
+  name: material
+  icon:
+    logo: material/book-search-outline
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.tracking
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - toc.follow
+
+# --- Markdown Extensions ---
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+# --- Plugins ---
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 2
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            filters: ["!^_"]
+  - git-revision-date-localized:
+      enable_creation_date: true
+      enable_git_follow: false
+      type: date
+
+# --- Navigation Structure ---
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Guides:
+    - guides/index.md
+    - Searching: guides/searching.md
+    - Lookup & Citations: guides/lookup-and-citations.md
+    - PDFs & Conversion: guides/pdf-and-conversion.md
+    - Configuration: guides/configuration.md
+    - Output Formats: guides/output-formats.md
+    - Redistribution & Licensing: guides/licensing.md
+  - CLI Reference: cli/index.md
+  - API Reference:
+    - api/index.md
+    - Search: api/search.md
+    - Citations: api/citations.md
+    - Models: api/models.md
+    - Config: api/config.md
+    - Exceptions: api/exceptions.md
+  - Development:
+    - development/index.md
+    - Architecture: development/architecture.md
+    - Contributing: development/contributing.md
+    - Testing: development/testing.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/neuromechanist/opencite
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/opencite/
+
+copyright: Copyright &copy; 2026 Seyed Yahya Shirazi &middot; MIT License

@@ -162,14 +162,26 @@ class SearchOrchestrator:
         all_papers: list[Paper] = []
         source_counts: dict[str, int] = {}
 
-        for source_name, task in tasks.items():
-            try:
-                papers = await task
-                source_counts[source_name] = len(papers)
-                all_papers.extend(papers)
-            except Exception as exc:
-                logger.warning("Search failed for source %s: %s", source_name, exc)
-                source_counts[source_name] = 0
+        try:
+            for source_name, task in tasks.items():
+                try:
+                    papers = await task
+                    source_counts[source_name] = len(papers)
+                    all_papers.extend(papers)
+                except Exception as exc:
+                    logger.warning("Search failed for source %s: %s", source_name, exc)
+                    source_counts[source_name] = 0
+        finally:
+            # Make sure no per-source task outlives this call. If the caller
+            # cancels search() (e.g. via asyncio.wait_for) part-way through the
+            # loop, the tasks not yet awaited would keep running and then hit
+            # HTTP clients that __aexit__ has already closed. Cancel and drain
+            # whatever is still pending.
+            pending = [t for t in tasks.values() if not t.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
         # Deduplicate and merge
         total_before = len(all_papers)

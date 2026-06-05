@@ -250,3 +250,37 @@ class TestEnrichPreprintBranches:
         orchestrator._osf.lookup_doi.assert_not_called()
         orchestrator._zenodo.lookup_doi.assert_not_called()
         orchestrator._figshare.lookup_doi.assert_not_called()
+
+
+class TestSearchCancellation:
+    """search() must not leave per-source tasks running after cancellation."""
+
+    @pytest.mark.asyncio
+    async def test_pending_tasks_cancelled_on_timeout(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        orch = SearchOrchestrator(Config())
+        started: list[asyncio.Task] = []
+
+        async def slow_source(*_args, **_kwargs):
+            started.append(asyncio.current_task())
+            await asyncio.sleep(5)
+            return []
+
+        # Two sources that never finish within the timeout window.
+        orch._search_openalex = AsyncMock(side_effect=slow_source)
+        orch._search_s2 = AsyncMock(side_effect=slow_source)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(
+                orch.search("anything", sources=("openalex", "s2")),
+                timeout=0.1,
+            )
+
+        # Both per-source tasks started; by the time wait_for returns, search()'s
+        # cleanup must have cancelled them. Without the cleanup the un-awaited
+        # second task would still be running here.
+        assert len(started) == 2
+        assert all(t.done() for t in started)
+        assert all(t.cancelled() for t in started)

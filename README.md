@@ -1,5 +1,7 @@
 # OpenCite
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20696765.svg)](https://doi.org/10.5281/zenodo.20696765)
+
 Academic literature search, citation management, and PDF retrieval CLI.
 
 Searches Semantic Scholar, OpenAlex, PubMed, arXiv, bioRxiv, medRxiv, OSF Preprints (PsyArXiv/SocArXiv/...), Zenodo, Figshare, CrossRef, and CORE in parallel, deduplicates results, and supports BibTeX output, citation graph traversal, PDF retrieval (with HTML full-text shortcuts for arXiv ar5iv and bioRxiv `.full`), batch downloads, and PDF-to-markdown conversion.

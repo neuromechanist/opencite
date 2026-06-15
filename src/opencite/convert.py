@@ -97,13 +97,10 @@ def _convert_with_mistral(
             "Install with: pip install 'opencite[pdf]'"
         ) from e
 
-    kwargs: dict[str, object] = {}
-    if api_key:
-        kwargs["api_key"] = api_key
-    if extract_images:
-        kwargs["include_images"] = True
-
-    converter = MarkItMistral(**kwargs)
+    converter = MarkItMistral(
+        api_key=api_key or None,
+        include_images=extract_images or None,
+    )
 
     if extract_images and output_path:
         # Use convert_file for full output with images

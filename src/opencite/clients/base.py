@@ -7,7 +7,7 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 import httpx
 
@@ -119,7 +119,7 @@ class BaseClient(ABC):
         with BaseClient._shared_limiters_lock:
             BaseClient._shared_limiters.clear()
 
-    async def __aenter__(self) -> BaseClient:
+    async def __aenter__(self) -> Self:
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=self.timeout,

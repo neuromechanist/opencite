@@ -65,6 +65,7 @@ class ArXivClient(PreprintClient):
         max_results: int = 20,
         year_from: int | None = None,
         year_to: int | None = None,
+        **_kwargs: object,
     ) -> list[Paper]:
         """Search arXiv for papers matching *query*.
 

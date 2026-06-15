@@ -32,6 +32,15 @@ uv run ruff check --fix src/ tests/  # auto-fix lint
 uv run ruff format src/ tests/   # format
 ```
 
+## Releases & Citation
+
+The package version is `__version__` in `src/opencite/__init__.py` (Hatch reads it). The
+repository is archived to Zenodo on every GitHub release, minting a versioned DOI under a stable
+concept DOI. When you bump `__version__` for a release, also bump `version` (and `date-released`)
+in `CITATION.cff` and keep `.zenodo.json` in sync, then tag `vX.Y.Z` and create the GitHub
+release. The concept DOI, added to `CITATION.cff` (`doi:`) and the README badge after the first
+Zenodo deposit, is stable across versions.
+
 ## Architecture
 
 ### Package Layout (`src/opencite/`)

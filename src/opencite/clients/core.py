@@ -63,7 +63,7 @@ class COREClient(BaseClient):
         }
 
         try:
-            resp = await self.get("/v3/search/works", params=params)
+            resp = await self.get("/v3/search/works/", params=params)
             data = resp.json()
         except Exception as e:
             logger.warning("CORE search failed: %s", e)
@@ -79,7 +79,7 @@ class COREClient(BaseClient):
 
         try:
             resp = await self.get(
-                "/v3/search/works", params={"q": f'doi:"{doi}"', "limit": 1}
+                "/v3/search/works/", params={"q": f'doi:"{doi}"', "limit": 1}
             )
             data = resp.json()
         except Exception as e:

@@ -142,19 +142,36 @@ def _load_toml(config_path: Path | None = None) -> dict[str, str]:
 
 
 def _resolve_config_path() -> Path:
-    """Resolve the config file path from OPENCITE_CONFIG env var or default."""
+    """Resolve the config file path from OPENCITE_CONFIG env var or default.
+
+    ``Path.home()`` is re-read on every call rather than reusing the
+    module-level ``CONFIG_FILE``. That constant is bound at import time, so a
+    caller that sets ``HOME`` afterwards -- notably pytest's ``monkeypatch`` --
+    would otherwise still be pointed at the invoking user's real config.
+    """
     env_path = os.environ.get("OPENCITE_CONFIG")
     if env_path:
         return Path(env_path)
-    return CONFIG_FILE
+    return Path.home() / ".opencite" / "config.toml"
 
 
-def create_default_config(path: Path | None = None) -> Path:
+def create_default_config(path: Path | None = None, force: bool = False) -> Path:
     """Create a default config.toml file.
 
+    Args:
+        path: Destination. Defaults to the resolved config path.
+        force: Overwrite an existing file. Off by default -- the template has
+            empty key fields, so overwriting silently destroys every API key
+            the user has configured.
+
     Returns the path to the created file.
+
+    Raises:
+        FileExistsError: If the target exists and ``force`` is False.
     """
-    target = path or CONFIG_FILE
+    target = path or _resolve_config_path()
+    if target.exists() and not force:
+        raise FileExistsError(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(_CONFIG_TEMPLATE)
     return target

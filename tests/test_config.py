@@ -6,6 +6,8 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from opencite.config import (
     Config,
     _load_toml,
@@ -241,3 +243,39 @@ class TestConfigShow:
         config = Config()
         output = config.show(mask_keys=True)
         assert "(not set)" in output
+
+
+class TestCreateDefaultConfigDoesNotClobber:
+    """Regression: `config init` used to overwrite an existing config.
+
+    `create_default_config` wrote the blank template unconditionally, and
+    resolved its default target from the import-time `CONFIG_FILE` constant --
+    so it ignored both `HOME` and `OPENCITE_CONFIG` set after import. Running
+    the test suite destroyed the invoking developer's real API keys.
+    """
+
+    def test_refuses_to_overwrite_existing(self, tmp_path):
+        path = tmp_path / "config.toml"
+        path.write_text('[api_keys]\nsemantic_scholar = "REAL_KEY"\n')
+        with pytest.raises(FileExistsError):
+            create_default_config(path)
+        assert "REAL_KEY" in path.read_text()
+
+    def test_force_overwrites(self, tmp_path):
+        path = tmp_path / "config.toml"
+        path.write_text('[api_keys]\nsemantic_scholar = "REAL_KEY"\n')
+        create_default_config(path, force=True)
+        assert "REAL_KEY" not in path.read_text()
+
+    def test_default_target_follows_HOME_set_after_import(self, tmp_path, monkeypatch):
+        """The bug that caused the data loss: HOME was ignored."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("OPENCITE_CONFIG", raising=False)
+        written = create_default_config()
+        assert written == tmp_path / ".opencite" / "config.toml"
+        assert written.is_relative_to(tmp_path)
+
+    def test_default_target_honours_OPENCITE_CONFIG(self, tmp_path, monkeypatch):
+        target = tmp_path / "elsewhere.toml"
+        monkeypatch.setenv("OPENCITE_CONFIG", str(target))
+        assert create_default_config() == target

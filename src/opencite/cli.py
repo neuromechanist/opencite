@@ -227,7 +227,14 @@ def create_parser() -> argparse.ArgumentParser:
     # -- config --
     config_p = subparsers.add_parser("config", help="manage opencite configuration")
     config_sub = config_p.add_subparsers(dest="config_action")
-    config_sub.add_parser("init", help="create default ~/.opencite/config.toml")
+    config_init = config_sub.add_parser(
+        "init", help="create default ~/.opencite/config.toml"
+    )
+    config_init.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing config file (destroys any keys in it)",
+    )
     config_sub.add_parser("show", help="show resolved configuration")
     config_sub.add_parser("path", help="show config file location")
 
@@ -650,7 +657,12 @@ def _cmd_config(args: argparse.Namespace) -> int:
     from opencite.config import Config, _resolve_config_path, create_default_config
 
     if args.config_action == "init":
-        path = create_default_config()
+        try:
+            path = create_default_config(force=getattr(args, "force", False))
+        except FileExistsError as e:
+            print(f"Config file already exists: {e.args[0]}")
+            print("Refusing to overwrite it; re-run with --force to replace it.")
+            return 1
         print(f"Created config file: {path}")
         print("Edit it to add your API keys.")
         return 0

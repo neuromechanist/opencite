@@ -175,11 +175,22 @@ class BaseClient(ABC):
             # Upstream APIs move endpoints behind 3xx (CORE now 301s
             # /v3/search/works -> /v3/search/works/). Without this the redirect
             # surfaces as an APIError and the source silently returns nothing.
-            # httpx strips Authorization on cross-origin redirects, so this does
-            # not leak an API key to a third-party host.
+            # httpx strips Authorization on cross-origin redirects; the request
+            # hook drops the other credential header we send (x-api-key).
             follow_redirects=True,
+            event_hooks={"request": [self._strip_foreign_credentials]},
         )
         return self
+
+    async def _strip_foreign_credentials(self, request: httpx.Request) -> None:
+        """Remove custom API-key headers from requests to a foreign host.
+
+        A redirect to another origin re-sends the client's default headers;
+        httpx only strips `Authorization` itself.
+        """
+        if request.url.host != httpx.URL(self.base_url).host:
+            for header in _CREDENTIAL_HEADERS:
+                request.headers.pop(header, None)
 
     async def __aexit__(self, *args: Any) -> None:
         if self._client:
@@ -261,6 +272,10 @@ class BaseClient(ABC):
     async def post(self, path: str, **kwargs: Any) -> httpx.Response:
         return await self._request("POST", path, **kwargs)
 
+
+# Credential headers other than Authorization, which httpx already strips on
+# cross-origin redirects.
+_CREDENTIAL_HEADERS = ("x-api-key",)
 
 # Query parameters that carry credentials or contact details; their values
 # are masked before a URL is put in an error message or log line.

@@ -226,6 +226,34 @@ class TestCredentialRedaction:
         assert "s3cret" not in str(excinfo.value)
 
 
+class _KeyedClient(_TestClient):
+    def _default_headers(self) -> dict[str, str]:
+        return {"x-api-key": "s3cret"}
+
+
+class TestRedirectCredentials:
+    @respx.mock
+    async def test_x_api_key_kept_on_same_host_redirect(self, test_config: Config):
+        respx.get(f"{BASE_URL}/old").mock(
+            return_value=httpx.Response(301, headers={"Location": f"{BASE_URL}/new"})
+        )
+        route = respx.get(f"{BASE_URL}/new").mock(return_value=httpx.Response(200))
+        async with _KeyedClient(test_config) as client:
+            await client.get("/old")
+        assert route.calls.last.request.headers["x-api-key"] == "s3cret"
+
+    @respx.mock
+    async def test_x_api_key_dropped_on_cross_host_redirect(self, test_config: Config):
+        elsewhere = "https://other.example.org"
+        respx.get(f"{BASE_URL}/old").mock(
+            return_value=httpx.Response(301, headers={"Location": f"{elsewhere}/new"})
+        )
+        route = respx.get(f"{elsewhere}/new").mock(return_value=httpx.Response(200))
+        async with _KeyedClient(test_config) as client:
+            await client.get("/old")
+        assert "x-api-key" not in route.calls.last.request.headers
+
+
 class TestRedactedChaining:
     @respx.mock
     async def test_traceback_chain_carries_no_api_key(self, test_config: Config):

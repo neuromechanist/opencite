@@ -209,3 +209,16 @@ class TestPause:
         start = time.monotonic()
         await rl.acquire()
         assert time.monotonic() - start >= 0.08
+
+
+class TestPauseExtension:
+    @pytest.mark.asyncio
+    async def test_pause_extended_while_waiting_is_honored(self):
+        rl = RateLimiter(rate=1000.0, burst=10)
+        rl.pause(0.05)
+        start = time.monotonic()
+        waiter = asyncio.create_task(rl.acquire())
+        await asyncio.sleep(0.01)
+        rl.pause(0.15)  # a later 429 extends the pause
+        await waiter
+        assert time.monotonic() - start >= 0.13

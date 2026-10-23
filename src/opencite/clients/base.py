@@ -90,8 +90,8 @@ class RateLimiter:
     async def acquire(self) -> None:
         """Wait until a token is available, then consume one."""
         async with self._lock_for_loop():
-            paused_for = self._resume_at - time.monotonic()
-            if paused_for > 0:
+            # Loop: a later 429 may extend the pause while we sleep.
+            while (paused_for := self._resume_at - time.monotonic()) > 0:
                 await asyncio.sleep(paused_for)
             now = time.monotonic()
             elapsed = now - self._last_refill
@@ -234,9 +234,11 @@ class BaseClient(ABC):
                     )
                     await asyncio.sleep(wait)
                     continue
+                # `from None`: the chained HTTPStatusError would print the
+                # unredacted URL (and any API key) in tracebacks.
                 raise APIError.from_http_error(
                     e, e.response.status_code, _describe(e)
-                ) from e
+                ) from None
             except httpx.RequestError as e:
                 last_failure = _describe(e)
                 wait = 2**attempt
@@ -291,9 +293,17 @@ def _describe(exc: Exception) -> str:
     return str(exc) or type(exc).__name__
 
 
+_MAX_RETRY_AFTER = 60
+
+
 def _retry_after_seconds(resp: httpx.Response, default: int = 5) -> int:
-    """Parse a numeric Retry-After header; fall back for HTTP-date or junk."""
+    """Parse a numeric Retry-After header, capped at 60 s.
+
+    Falls back to *default* for an HTTP-date or junk value. The cap matters
+    because the wait pauses every client sharing the limiter.
+    """
     try:
-        return max(0, int(resp.headers.get("Retry-After", default)))
+        seconds = int(resp.headers.get("Retry-After", default))
     except ValueError:
-        return default
+        seconds = default
+    return min(max(0, seconds), _MAX_RETRY_AFTER)

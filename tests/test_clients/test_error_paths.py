@@ -224,3 +224,27 @@ class TestCredentialRedaction:
             with pytest.raises(APIError) as excinfo:
                 await client.get("/data", params={"api_key": "s3cret"})
         assert "s3cret" not in str(excinfo.value)
+
+
+class TestRedactedChaining:
+    @respx.mock
+    async def test_traceback_chain_carries_no_api_key(self, test_config: Config):
+        import traceback
+
+        # Built at runtime so the traceback's own source lines can't show it.
+        secret = "".join(["s3", "cr", "et"])
+        respx.get(f"{BASE_URL}/data").mock(return_value=httpx.Response(400))
+        async with _TestClient(test_config) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data", params={"api_key": secret})
+        rendered = "".join(traceback.format_exception(excinfo.value))
+        assert secret not in rendered
+        assert excinfo.value.cause is None
+
+
+class TestRetryAfterCap:
+    def test_retry_after_is_capped(self):
+        from opencite.clients.base import _retry_after_seconds
+
+        resp = httpx.Response(429, headers={"Retry-After": "3600"})
+        assert _retry_after_seconds(resp) == 60

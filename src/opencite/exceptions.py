@@ -43,13 +43,16 @@ class APIError(OpenCiteError):
 
         *description* replaces ``str(error)`` in the message; callers pass a
         redacted one so credentials in the request URL never reach messages.
+        The raw *error* is then not kept as ``cause`` either, since its text
+        still carries the unredacted URL.
         """
         text = description if description is not None else str(error)
+        cause = error if description is None else None
         if status_code in (401, 403):
             return APIKeyError(text)
         if status_code == 429:
-            return RateLimitError(cause=error)
-        return cls(f"HTTP {status_code}: {text}", status_code=status_code, cause=error)
+            return RateLimitError(cause=cause)
+        return cls(f"HTTP {status_code}: {text}", status_code=status_code, cause=cause)
 
 
 class APIKeyError(APIError):

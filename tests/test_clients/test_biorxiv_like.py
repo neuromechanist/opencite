@@ -23,6 +23,7 @@ from opencite.clients._biorxiv_like import _crossref_item_server
 from opencite.clients.biorxiv import BioRxivClient
 from opencite.clients.medrxiv import MedRxivClient
 from opencite.config import Config
+from opencite.utils import is_openrxiv_doi
 
 _CONTENT_API_BASE = "https://api.biorxiv.org"
 
@@ -136,6 +137,14 @@ class TestBiorxivLikeFulltext:
 
         client = BioRxivClient(_config)
         paper = Paper(title="A", ids=IDSet(doi="10.1101/2024.01.01.000001"))
+        assert client.fulltext_route(paper) == FulltextRoute.HTML
+
+    def test_fulltext_route_html_for_openrxiv_doi(self, _config: Config):
+        from opencite.clients.preprint_base import FulltextRoute
+        from opencite.models import IDSet, Paper
+
+        client = MedRxivClient(_config)
+        paper = Paper(title="A", ids=IDSet(doi="10.64898/2026.09.06.26362366"))
         assert client.fulltext_route(paper) == FulltextRoute.HTML
 
     def test_fulltext_route_none_without_biorxiv_doi(self, _config: Config):
@@ -262,7 +271,7 @@ class TestBiorxivLikeSearchLive:
         async with BioRxivClient(Config()) as client:
             papers = await client.search("working memory training", max_results=5)
         assert papers
-        assert all(p.ids.doi.startswith("10.1101/") for p in papers)
+        assert all(is_openrxiv_doi(p.ids.doi) for p in papers)
         assert all("biorxiv" in p.data_sources for p in papers)
 
     async def test_medrxiv_search_returns_medrxiv_preprints(self):

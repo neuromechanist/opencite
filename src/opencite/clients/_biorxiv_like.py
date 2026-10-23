@@ -29,6 +29,7 @@ from opencite.clients.preprint_base import (
 )
 from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
+from opencite.utils import is_openrxiv_doi
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -176,9 +177,9 @@ class _BiorxivLikePreprintClient(PreprintClient):
     # ------------------------------------------------------------------
 
     def fulltext_route(self, paper: Paper) -> FulltextRoute:
-        """`.full` HTML when a 10.1101/* DOI is present, else NONE."""
+        """`.full` HTML when an openRxiv DOI is present, else NONE."""
         doi = (paper.doi or "").strip()
-        return FulltextRoute.HTML if doi.startswith("10.1101/") else FulltextRoute.NONE
+        return FulltextRoute.HTML if is_openrxiv_doi(doi) else FulltextRoute.NONE
 
     async def fetch_fulltext(self, paper: Paper) -> str | None:
         """Fetch the bioRxiv/medRxiv `.full` HTML and return markdown.
@@ -189,7 +190,7 @@ class _BiorxivLikePreprintClient(PreprintClient):
         response, or markdown conversion failure.
         """
         doi = (paper.doi or "").strip()
-        if not doi.startswith("10.1101/"):
+        if not is_openrxiv_doi(doi):
             return None
 
         if self._client is None:

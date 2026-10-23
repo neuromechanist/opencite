@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from opencite.utils import (
+    is_openrxiv_doi,
     normalize_title,
     parse_author_name,
     reconstruct_abstract,
@@ -88,3 +91,16 @@ class TestReconstructAbstract:
     def test_repeated_word(self):
         inverted = {"the": [0, 2], "cat": [1], "dog": [3]}
         assert reconstruct_abstract(inverted) == "the cat the dog"
+
+
+class TestIsOpenrxivDoi:
+    @pytest.mark.parametrize(
+        "doi",
+        ["10.1101/2024.01.01.000001", "10.64898/2026.09.06.26362366", " 10.1101/x "],
+    )
+    def test_openrxiv_prefixes(self, doi: str):
+        assert is_openrxiv_doi(doi)
+
+    @pytest.mark.parametrize("doi", ["10.1038/nature12373", "10.11011/x", ""])
+    def test_other_prefixes(self, doi: str):
+        assert not is_openrxiv_doi(doi)

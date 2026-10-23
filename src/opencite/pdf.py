@@ -13,6 +13,7 @@ import httpx
 from opencite.clients.id_converter import IDConverterClient
 from opencite.clients.unpaywall import UnpaywallClient
 from opencite.models import IDType, Paper, PDFLocation, parse_identifier
+from opencite.utils import is_openrxiv_doi
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -66,6 +67,7 @@ PUBLISHER_INFO: dict[str, str] = {
     "10.7554": "eLife (open access -- should always have free PDF)",
     "10.1523": "J. Neuroscience (check Unpaywall, many are OA after embargo)",
     "10.1101": "bioRxiv/medRxiv (always open access)",
+    "10.64898": "bioRxiv/medRxiv (always open access)",
     "10.48550": "arXiv (always open access)",
     "10.1136": "BMJ (check Unpaywall for OA copies)",
     "10.1001": "JAMA Network (check Unpaywall for OA copies)",
@@ -223,8 +225,8 @@ class PDFRetriever:
             except Exception as e:
                 logger.debug("Unpaywall lookup failed for %s: %s", doi, e)
 
-        # Priority 5a: Direct bioRxiv/medRxiv PDF for 10.1101/ DOIs
-        if doi and doi.startswith("10.1101/"):
+        # Priority 5a: Direct bioRxiv/medRxiv PDF for openRxiv DOIs
+        if doi and is_openrxiv_doi(doi):
             preprint_server = "biorxiv"
             if paper and (
                 "medrxiv" in paper.data_sources

@@ -20,6 +20,7 @@ from opencite.clients.zenodo import ZenodoClient
 from opencite.dedup import deduplicate
 from opencite.models import IDType, Paper, SearchResult, parse_identifier
 from opencite.sources import canonicalize
+from opencite.utils import is_openrxiv_doi
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -371,10 +372,10 @@ class SearchOrchestrator:
             if "pubmed" not in paper.data_sources:
                 tasks.append(asyncio.create_task(self._pubmed.lookup_doi(paper.doi)))
             # For bioRxiv/medRxiv preprints, enrich from their Content APIs.
-            # Both share the 10.1101 DOI prefix; fan out in parallel and the
+            # Both share the openRxiv DOI prefixes; fan out in parallel and the
             # one that hosts the preprint will return; the other returns None.
             if (
-                paper.doi.startswith("10.1101/")
+                is_openrxiv_doi(paper.doi)
                 and "biorxiv" not in paper.data_sources
                 and "medrxiv" not in paper.data_sources
             ):

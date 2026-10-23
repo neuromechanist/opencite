@@ -43,7 +43,8 @@ structured full-text, and converts PDFs to markdown.
   truncates to `max_results`. Pending tasks are always cancelled and drained so
   none outlives the call. A source whose search raises is recorded in
   `SearchResult.failed_sources` (shown as `failed` in the CLI summary), never as
-  zero results; CORE without an API key is left out of default searches.
+  zero results; CORE without an API key is left out of default searches. The
+  CLI exits with status 1 when no requested source could be searched.
 - **Full-text shortcuts.** When converting, OpenCite prefers PMC BioC structured
   full-text for open-access articles (no PDF needed) and HTML full-text for
   arXiv ar5iv and bioRxiv/medRxiv `.full`.
@@ -60,7 +61,7 @@ structured full-text, and converts PDFs to markdown.
 | Semantic Scholar | httpx REST | TLDR summaries, embeddings, batch 500 IDs, `citationStyles` for BibTeX |
 | PubMed / PMC | NCBI eutils XML | MeSH terms, ID Converter API; PMC BioC for structured full-text |
 | arXiv | Atom v1 API | Search + direct ID lookup; no key; direct PDF |
-| bioRxiv / medRxiv | CrossRef + Content API | Keyword search via CrossRef (openRxiv deposits, owner prefix 10.64898); DOI lookup via Content API; no key |
+| bioRxiv / medRxiv | CrossRef + Content API | Keyword search via CrossRef (openRxiv deposits, owner prefix 10.64898; newer DOIs also use 10.64898); DOI lookup via Content API; no key |
 | OSF Preprints | SHARE search + `api.osf.io/v2/preprints/` | PsyArXiv / SocArXiv / EarthArXiv / MetaArXiv; provider recorded as `osf:{provider}` |
 | Zenodo | `zenodo.org/api/records` | Filtered to publication preprints; plain queries require every term; optional access token |
 | Figshare | `api.figshare.com/v2` | Filtered to preprints; no key |

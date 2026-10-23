@@ -19,6 +19,7 @@ import httpx
 import pytest
 import respx
 
+from opencite.clients._biorxiv_like import _crossref_item_server
 from opencite.clients.biorxiv import BioRxivClient
 from opencite.clients.medrxiv import MedRxivClient
 from opencite.config import Config
@@ -206,3 +207,66 @@ class TestBiorxivLikeFulltext:
         async with BioRxivClient(_config) as client:
             md = await client.fetch_fulltext(Paper(title="x", ids=IDSet()))
         assert md is None
+
+
+class TestCrossrefItemServer:
+    """Server attribution for CrossRef 10.1101 records."""
+
+    # Shape of a current openRxiv deposit (no container-title), trimmed
+    # from a live CrossRef response.
+    _OPENRXIV_MEDRXIV_ITEM = {
+        "DOI": "10.1101/2021.02.05.21251139",
+        "type": "posted-content",
+        "subtype": "preprint",
+        "publisher": "openRxiv",
+        "institution": [{"name": "medRxiv"}],
+        "group-title": "Health Informatics",
+        "resource": {
+            "primary": {
+                "URL": "http://medrxiv.org/lookup/doi/10.1101/2021.02.05.21251139"
+            }
+        },
+    }
+    _OPENRXIV_BIORXIV_ITEM = {
+        "DOI": "10.1101/450023",
+        "type": "posted-content",
+        "publisher": "openRxiv",
+        "group-title": "Neuroscience",
+        "resource": {
+            "primary": {"URL": "http://biorxiv.org/lookup/doi/10.1101/450023"}
+        },
+    }
+
+    def test_openrxiv_medrxiv_by_resource_url(self):
+        assert _crossref_item_server(self._OPENRXIV_MEDRXIV_ITEM) == "medrxiv"
+
+    def test_openrxiv_biorxiv_by_resource_url(self):
+        assert _crossref_item_server(self._OPENRXIV_BIORXIV_ITEM) == "biorxiv"
+
+    def test_institution_alone_identifies_medrxiv(self):
+        item = {"institution": [{"name": "medRxiv"}]}
+        assert _crossref_item_server(item) == "medrxiv"
+
+    def test_legacy_container_title(self):
+        assert _crossref_item_server({"container-title": ["medRxiv"]}) == "medrxiv"
+
+    def test_unknown_defaults_to_biorxiv(self):
+        assert _crossref_item_server({}) == "biorxiv"
+
+
+@pytest.mark.integration
+class TestBiorxivLikeSearchLive:
+    """Keyword search through CrossRef must find openRxiv-deposited preprints."""
+
+    async def test_biorxiv_search_returns_biorxiv_preprints(self):
+        async with BioRxivClient(Config()) as client:
+            papers = await client.search("working memory training", max_results=5)
+        assert papers
+        assert all(p.ids.doi.startswith("10.1101/") for p in papers)
+        assert all("biorxiv" in p.data_sources for p in papers)
+
+    async def test_medrxiv_search_returns_medrxiv_preprints(self):
+        async with MedRxivClient(Config()) as client:
+            papers = await client.search("covid vaccine effectiveness", max_results=5)
+        assert papers
+        assert all("medrxiv" in p.data_sources for p in papers)

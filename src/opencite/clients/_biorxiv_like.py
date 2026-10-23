@@ -40,6 +40,12 @@ _BIORXIV_BASE = "https://api.biorxiv.org"
 # CrossRef "type" for preprints
 _PREPRINT_TYPE = "posted-content"
 
+# CrossRef's `prefix` filter matches the depositing member's owner prefix,
+# not the DOI string. bioRxiv/medRxiv DOIs keep the 10.1101 prefix, but
+# their records are now deposited by openRxiv under owner prefix 10.64898;
+# repeating a filter name ORs the values.
+_CROSSREF_FILTER = f"prefix:10.1101,prefix:10.64898,type:{_PREPRINT_TYPE}"
+
 
 class _BiorxivLikePreprintClient(PreprintClient):
     """Internal base class for bioRxiv- and medRxiv-style preprint clients.
@@ -110,13 +116,13 @@ class _BiorxivLikePreprintClient(PreprintClient):
         """
         params: dict[str, Any] = {
             "query.bibliographic": query,
-            "filter": f"prefix:10.1101,type:{_PREPRINT_TYPE}",
-            # Ask CrossRef for more rows than requested because we will
-            # post-filter on container-title.
-            "rows": min(max_results * 2, 100),
+            "filter": _CROSSREF_FILTER,
+            # bioRxiv and medRxiv hits come back interleaved and each client
+            # keeps only its own server's, so fetch a full page.
+            "rows": 100,
             "select": (
                 "DOI,title,author,published,created,abstract,"
-                "container-title,URL,is-referenced-by-count"
+                "container-title,resource,URL,is-referenced-by-count"
             ),
         }
 
@@ -284,8 +290,8 @@ class _BiorxivLikePreprintClient(PreprintClient):
     def _parse_crossref_item(self, item: dict) -> Paper | None:
         """Parse a CrossRef works item into a Paper, filtered to this server.
 
-        Returns None when the item's container-title doesn't match this
-        client's server, so each client only emits papers it owns.
+        Returns None when the item belongs to the other server, so each
+        client only emits papers it owns.
         """
         doi = (item.get("DOI") or "").strip()
         titles = item.get("title") or []
@@ -293,13 +299,7 @@ class _BiorxivLikePreprintClient(PreprintClient):
         if not title:
             return None
 
-        # Determine server from container-title and filter to this client's
-        # server. CrossRef's container-title field reliably distinguishes
-        # bioRxiv from medRxiv even though they share the 10.1101 DOI prefix.
-        container = item.get("container-title") or []
-        container_name = container[0].lower() if container else ""
-        # Default to biorxiv for empty/unknown container-titles.
-        item_server = "medrxiv" if "medrxiv" in container_name else "biorxiv"
+        item_server = _crossref_item_server(item)
         if item_server != self.server:
             return None
 
@@ -365,3 +365,18 @@ class _BiorxivLikePreprintClient(PreprintClient):
             citation_count=citation_count,
             data_sources={item_server},
         )
+
+
+def _crossref_item_server(item: dict) -> str:
+    """Return ``"medrxiv"`` or ``"biorxiv"`` for a 10.1101 CrossRef item.
+
+    openRxiv deposits omit ``container-title``; the primary resource URL
+    (``http://medrxiv.org/lookup/doi/...``) and ``institution`` name still
+    identify the server. Older deposits carry the server as container-title.
+    Unknown items default to bioRxiv.
+    """
+    primary_url = ((item.get("resource") or {}).get("primary") or {}).get("URL") or ""
+    container = item.get("container-title") or []
+    institutions = [i.get("name") or "" for i in item.get("institution") or []]
+    signals = " ".join([primary_url, *container, *institutions]).lower()
+    return "medrxiv" if "medrxiv" in signals else "biorxiv"

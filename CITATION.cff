@@ -18,8 +18,8 @@ authors:
 repository-code: "https://github.com/neuromechanist/opencite"
 url: "https://neuromechanist.github.io/opencite/"
 license: MIT
-version: 0.5.4
-date-released: "2026-06-14"
+version: 0.6.0
+date-released: "2026-10-23"
 keywords:
   - academic
   - literature

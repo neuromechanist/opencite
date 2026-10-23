@@ -93,6 +93,11 @@ class FigshareClient(PreprintClient):
             return_exceptions=False,
         )
 
+        if article_ids and all(full is None for full in full_records):
+            raise APIError(
+                f"Figshare article fetch failed for all {len(article_ids)} results"
+            )
+
         papers: list[Paper] = []
         for full in full_records:
             if full is None:

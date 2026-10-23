@@ -84,7 +84,9 @@ class ArXivClient(PreprintClient):
         }
 
         resp = await self.get("/query", params=params)
-        return self._parse_feed(resp.text, year_from=year_from, year_to=year_to)
+        return self._parse_feed(
+            resp.text, year_from=year_from, year_to=year_to, strict=True
+        )
 
     async def lookup_arxiv_id(self, arxiv_id: str) -> Paper | None:
         """Look up a single paper by arXiv ID (e.g. ``2106.15928`` or ``cs.LG/0101001``)."""
@@ -170,11 +172,18 @@ class ArXivClient(PreprintClient):
         xml_text: str,
         year_from: int | None = None,
         year_to: int | None = None,
+        *,
+        strict: bool = False,
     ) -> list[Paper]:
-        """Parse an Atom feed response into a list of Papers."""
+        """Parse an Atom feed into Papers.
+
+        Malformed XML yields ``[]``, or raises `APIError` when *strict*.
+        """
         try:
             root = ET.fromstring(xml_text)
         except ET.ParseError as exc:
+            if strict:
+                raise APIError(f"arXiv returned malformed Atom XML: {exc}") from exc
             logger.warning(
                 "arXiv: failed to parse Atom XML (%s). Preview: %.100r",
                 exc,

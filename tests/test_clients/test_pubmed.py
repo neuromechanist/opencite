@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
+import respx
 
 from opencite.clients.pubmed import (
+    BASE_URL,
     PubMedClient,
     _extract_authors,
     _extract_link_ids,
@@ -562,3 +565,25 @@ class TestExtractAuthors:
         elem = self._make_author_xml(author_xml)
         authors = _extract_authors(elem)
         assert len(authors) == 50
+
+
+class TestPubMedSearchFailures:
+    def test_strict_parse_raises_on_malformed_xml(self):
+        from opencite.exceptions import APIError
+
+        with pytest.raises(APIError, match="malformed XML"):
+            _parse_pubmed_xml("<not valid><<<", strict=True)
+
+    @respx.mock
+    async def test_search_raises_when_every_efetch_chunk_fails(self):
+        from opencite.exceptions import APIError
+
+        respx.get(f"{BASE_URL}/esearch.fcgi").mock(
+            return_value=httpx.Response(
+                200, json={"esearchresult": {"idlist": ["1", "2"]}}
+            )
+        )
+        respx.get(f"{BASE_URL}/efetch.fcgi").mock(return_value=httpx.Response(400))
+        async with PubMedClient(Config(pubmed_api_key="")) as client:
+            with pytest.raises(APIError, match="every chunk"):
+                await client.search("memory")

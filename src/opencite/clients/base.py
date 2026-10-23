@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Self
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 import httpx
 
@@ -29,18 +33,24 @@ class RateLimiter:
     functions), the lock is transparently recreated.
     """
 
-    def __init__(self, rate: float, burst: int = 1):
+    def __init__(self, rate: float, burst: int = 1, max_concurrent: int | None = None):
         """
         Args:
             rate: Requests per second allowed.
             burst: Maximum burst size.
+            max_concurrent: Maximum requests in flight at once, or None
+                for no cap. Some APIs (e.g. CrossRef) limit concurrency
+                separately from request rate.
         """
         self.rate = rate
         self.burst = burst
+        self.max_concurrent = max_concurrent
         self._tokens = float(burst)
         self._last_refill = time.monotonic()
         self._lock: asyncio.Lock | None = None
         self._lock_loop_id: int | None = None
+        self._semaphore: asyncio.Semaphore | None = None
+        self._semaphore_loop_id: int | None = None
 
     def _lock_for_loop(self) -> asyncio.Lock:
         loop_id = id(asyncio.get_running_loop())
@@ -48,6 +58,27 @@ class RateLimiter:
             self._lock = asyncio.Lock()
             self._lock_loop_id = loop_id
         return self._lock
+
+    def _semaphore_for_loop(self) -> asyncio.Semaphore | None:
+        if self.max_concurrent is None:
+            return None
+        loop_id = id(asyncio.get_running_loop())
+        if self._semaphore is None or self._semaphore_loop_id != loop_id:
+            self._semaphore = asyncio.Semaphore(self.max_concurrent)
+            self._semaphore_loop_id = loop_id
+        return self._semaphore
+
+    @contextlib.asynccontextmanager
+    async def slot(self) -> AsyncGenerator[None]:
+        """Hold a concurrency slot (if capped) and consume one token."""
+        semaphore = self._semaphore_for_loop()
+        if semaphore is None:
+            await self.acquire()
+            yield
+            return
+        async with semaphore:
+            await self.acquire()
+            yield
 
     async def acquire(self) -> None:
         """Wait until a token is available, then consume one."""
@@ -94,22 +125,27 @@ class BaseClient(ABC):
         burst: int = 1,
         timeout: float | None = None,
         max_retries: int | None = None,
+        max_concurrent: int | None = None,
     ):
         self.config = config
         self.base_url = base_url
-        self.rate_limiter = self._resolve_rate_limiter(rate_limit, burst)
+        self.rate_limiter = self._resolve_rate_limiter(
+            rate_limit, burst, max_concurrent
+        )
         self.timeout = timeout or config.timeout
         self.max_retries = max_retries or config.max_retries
         self._client: httpx.AsyncClient | None = None
 
-    def _resolve_rate_limiter(self, rate_limit: float, burst: int) -> RateLimiter:
+    def _resolve_rate_limiter(
+        self, rate_limit: float, burst: int, max_concurrent: int | None
+    ) -> RateLimiter:
         key = self.shared_limiter_key
         if key is None:
-            return RateLimiter(rate_limit, burst)
+            return RateLimiter(rate_limit, burst, max_concurrent)
         with BaseClient._shared_limiters_lock:
             limiter = BaseClient._shared_limiters.get(key)
             if limiter is None:
-                limiter = RateLimiter(rate_limit, burst)
+                limiter = RateLimiter(rate_limit, burst, max_concurrent)
                 BaseClient._shared_limiters[key] = limiter
             return limiter
 
@@ -153,13 +189,14 @@ class BaseClient(ABC):
         if self._client is None:
             raise RuntimeError("Client not initialized. Use 'async with'.")
 
-        last_error: Exception | None = None
+        last_failure: str | None = None
         for attempt in range(self.max_retries):
-            await self.rate_limiter.acquire()
             try:
-                resp = await self._client.request(method, path, **kwargs)
+                async with self.rate_limiter.slot():
+                    resp = await self._client.request(method, path, **kwargs)
                 if resp.status_code == 429:
-                    retry_after = int(resp.headers.get("Retry-After", "5"))
+                    last_failure = "HTTP 429 Too Many Requests"
+                    retry_after = _retry_after_seconds(resp)
                     logger.warning(
                         "Rate limited by %s, waiting %ds (attempt %d/%d)",
                         self.base_url,
@@ -172,7 +209,7 @@ class BaseClient(ABC):
                 resp.raise_for_status()
                 return resp
             except httpx.HTTPStatusError as e:
-                last_error = e
+                last_failure = _describe(e)
                 if e.response.status_code >= 500:
                     wait = 2**attempt
                     logger.warning(
@@ -185,19 +222,19 @@ class BaseClient(ABC):
                     continue
                 raise APIError.from_http_error(e, e.response.status_code) from e
             except httpx.RequestError as e:
-                last_error = e
+                last_failure = _describe(e)
                 wait = 2**attempt
                 logger.warning(
                     "Request error from %s: %s, retry in %ds",
                     self.base_url,
-                    e,
+                    _describe(e),
                     wait,
                 )
                 await asyncio.sleep(wait)
 
         raise APIError(
             f"Failed after {self.max_retries} retries to {self.base_url}",
-            details=str(last_error) if last_error else None,
+            details=last_failure,
         )
 
     async def get(self, path: str, **kwargs: Any) -> httpx.Response:
@@ -205,3 +242,16 @@ class BaseClient(ABC):
 
     async def post(self, path: str, **kwargs: Any) -> httpx.Response:
         return await self._request("POST", path, **kwargs)
+
+
+def _describe(exc: Exception) -> str:
+    """Render an exception for logs; httpx timeouts often have an empty message."""
+    return str(exc) or type(exc).__name__
+
+
+def _retry_after_seconds(resp: httpx.Response, default: int = 5) -> int:
+    """Parse a numeric Retry-After header; fall back for HTTP-date or junk."""
+    try:
+        return max(0, int(resp.headers.get("Retry-After", default)))
+    except ValueError:
+        return default

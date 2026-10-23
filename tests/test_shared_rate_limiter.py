@@ -114,3 +114,41 @@ class TestSharedLimiterSerializesRate:
         elapsed = time.monotonic() - start
         # At 10 req/s, refill time is 0.1s. Allow generous margin.
         assert elapsed >= 0.05
+
+
+class TestConcurrencyCap:
+    """`max_concurrent` bounds requests in flight, independent of rate."""
+
+    @pytest.mark.asyncio
+    async def test_slot_caps_in_flight_holders(self):
+        rl = RateLimiter(rate=1000.0, burst=10, max_concurrent=1)
+        in_flight = 0
+        peak = 0
+
+        async def hold() -> None:
+            nonlocal in_flight, peak
+            async with rl.slot():
+                in_flight += 1
+                peak = max(peak, in_flight)
+                await asyncio.sleep(0.02)
+                in_flight -= 1
+
+        await asyncio.gather(*(hold() for _ in range(4)))
+        assert peak == 1
+
+    @pytest.mark.asyncio
+    async def test_slot_without_cap_allows_overlap(self):
+        rl = RateLimiter(rate=1000.0, burst=10)
+        in_flight = 0
+        peak = 0
+
+        async def hold() -> None:
+            nonlocal in_flight, peak
+            async with rl.slot():
+                in_flight += 1
+                peak = max(peak, in_flight)
+                await asyncio.sleep(0.02)
+                in_flight -= 1
+
+        await asyncio.gather(*(hold() for _ in range(4)))
+        assert peak > 1

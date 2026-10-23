@@ -203,3 +203,24 @@ class TestPostMethod:
             resp = await client.post("/submit", json={"key": "value"})
         assert resp.status_code == 200
         assert route.call_count == 1
+
+
+class TestCredentialRedaction:
+    @respx.mock
+    async def test_api_key_not_in_http_error(self, test_config: Config):
+        respx.get(f"{BASE_URL}/data").mock(return_value=httpx.Response(400))
+        async with _TestClient(test_config) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data", params={"api_key": "s3cret", "q": "x"})
+        text = str(excinfo.value)
+        assert "s3cret" not in text
+        assert "api_key=%2A%2A%2A" in text or "api_key=***" in text
+        assert "q=x" in text
+
+    @respx.mock
+    async def test_api_key_not_in_exhausted_5xx_details(self, test_config: Config):
+        respx.get(f"{BASE_URL}/data").mock(return_value=httpx.Response(503))
+        async with _TestClient(test_config) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data", params={"api_key": "s3cret"})
+        assert "s3cret" not in str(excinfo.value)

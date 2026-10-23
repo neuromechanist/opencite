@@ -220,7 +220,9 @@ class BaseClient(ABC):
                     )
                     await asyncio.sleep(wait)
                     continue
-                raise APIError.from_http_error(e, e.response.status_code) from e
+                raise APIError.from_http_error(
+                    e, e.response.status_code, _describe(e)
+                ) from e
             except httpx.RequestError as e:
                 last_failure = _describe(e)
                 wait = 2**attempt
@@ -244,8 +246,34 @@ class BaseClient(ABC):
         return await self._request("POST", path, **kwargs)
 
 
+# Query parameters that carry credentials or contact details; their values
+# are masked before a URL is put in an error message or log line.
+_SENSITIVE_PARAMS = frozenset(
+    {"api_key", "apikey", "key", "token", "access_token", "email", "mailto"}
+)
+
+
+def _redact_url(url: httpx.URL) -> str:
+    params = [
+        (name, "***" if name.lower() in _SENSITIVE_PARAMS else value)
+        for name, value in url.params.multi_items()
+    ]
+    return str(url.copy_with(params=params)) if params else str(url)
+
+
 def _describe(exc: Exception) -> str:
-    """Render an exception for logs; httpx timeouts often have an empty message."""
+    """Render an exception for errors and logs without leaking credentials.
+
+    HTTP status errors embed the request URL, which can hold an API key as a
+    query parameter, so they are rebuilt from the status and a redacted URL.
+    httpx timeouts often have an empty message, so fall back to the type name.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        resp = exc.response
+        return (
+            f"{resp.status_code} {resp.reason_phrase} for url "
+            f"'{_redact_url(exc.request.url)}'"
+        )
     return str(exc) or type(exc).__name__
 
 

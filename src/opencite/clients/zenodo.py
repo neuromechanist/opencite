@@ -31,7 +31,9 @@ _ZENODO_DOI_PREFIX = "10.5281/zenodo."
 
 # Elasticsearch query_string syntax; a query using any of it is passed
 # through untouched so power users keep full control.
-_QUERY_SYNTAX = re.compile(r'["():*?~^/\[\]{}\\!<>=&|]|\b(?:AND|OR|NOT)\b|(?:^|\s)[+-]')
+_QUERY_SYNTAX = re.compile(
+    r'["():*?~^/\[\]{}\\!]|&&|\|\||\b(?:AND|OR|NOT)\b|(?:^|\s)[+-]'
+)
 
 
 class ZenodoClient(PreprintClient):
@@ -207,4 +209,6 @@ def _require_all_terms(query: str) -> str:
     if _QUERY_SYNTAX.search(query):
         return query
     terms = [term.strip(",;") for term in query.split()]
-    return " ".join(f"+{term}" for term in terms if term)
+    # Bare punctuation ("&", "=", "|") is not a searchable term; requiring
+    # it would match nothing.
+    return " ".join(f"+{t}" for t in terms if any(c.isalnum() for c in t))

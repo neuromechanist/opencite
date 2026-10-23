@@ -121,6 +121,9 @@ class TestRequireAllTerms:
             ("Kalayeh, Mahdi", "+Kalayeh +Mahdi"),
             ("deep learning EEG-based", "+deep +learning +EEG-based"),
             ("single", "+single"),
+            ("Pride & Prejudice", "+Pride +Prejudice"),
+            ("Q&A chatbots", "+Q&A +chatbots"),
+            ("x = y theory", "+x +y +theory"),
         ],
     )
     def test_plain_queries_require_every_term(self, query: str, expected: str):
@@ -134,8 +137,9 @@ class TestRequireAllTerms:
             "a OR b",
             "-x y",
             "10.5281/zenodo.1",
-            "year>2020",
+            "year:>2020",
             "a && b",
+            "a || b",
             "wow!",
         ],
     )

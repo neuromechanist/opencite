@@ -128,7 +128,16 @@ class TestRequireAllTerms:
 
     @pytest.mark.parametrize(
         "query",
-        ['"exact phrase" x', "title:foo", "a OR b", "-x y", "10.5281/zenodo.1"],
+        [
+            '"exact phrase" x',
+            "title:foo",
+            "a OR b",
+            "-x y",
+            "10.5281/zenodo.1",
+            "year>2020",
+            "a && b",
+            "wow!",
+        ],
     )
     def test_search_syntax_passes_through(self, query: str):
         assert _require_all_terms(query) == query

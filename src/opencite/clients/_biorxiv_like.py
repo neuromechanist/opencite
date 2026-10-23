@@ -1,7 +1,7 @@
 """Shared base for bioRxiv-style preprint clients (bioRxiv + medRxiv).
 
-bioRxiv and medRxiv share the same DOI prefix (10.1101), the same CrossRef
-keyword-search path, and the same Content API (`api.biorxiv.org`) URL shape.
+bioRxiv and medRxiv share the same DOI prefixes (10.1101, and 10.64898 for
+newer openRxiv preprints), the same CrossRef keyword-search path, and the same Content API (`api.biorxiv.org`) URL shape.
 The only differences are:
 
 - the `server` segment in Content API URLs (`/details/{server}/{doi}`)
@@ -109,7 +109,7 @@ class _BiorxivLikePreprintClient(PreprintClient):
         """Search this server's preprints via CrossRef.
 
         CrossRef returns both bioRxiv and medRxiv records under the shared
-        ``prefix:10.1101`` filter, so each subclass post-filters to its own
+        openRxiv prefix filter, so each subclass post-filters to its own
         ``server`` to keep attribution clean.
 
         Raises `APIError` when CrossRef fails so the orchestrator can report

@@ -31,7 +31,7 @@ _ZENODO_DOI_PREFIX = "10.5281/zenodo."
 
 # Elasticsearch query_string syntax; a query using any of it is passed
 # through untouched so power users keep full control.
-_QUERY_SYNTAX = re.compile(r'["():*?~^/\[\]{}\\]|\b(?:AND|OR|NOT)\b|(?:^|\s)[+-]')
+_QUERY_SYNTAX = re.compile(r'["():*?~^/\[\]{}\\!<>=&|]|\b(?:AND|OR|NOT)\b|(?:^|\s)[+-]')
 
 
 class ZenodoClient(PreprintClient):

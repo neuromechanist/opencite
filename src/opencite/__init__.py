@@ -1,6 +1,6 @@
 """opencite: Academic literature search, citation management, and PDF retrieval."""
 
-__version__ = "0.5.4"
+__version__ = "0.6.0"
 
 from .config import Config
 from .models import (

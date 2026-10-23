@@ -35,11 +35,14 @@ _ARXIV_DOI_PREFIX = "10.48550/arxiv."
 class ArXivClient(PreprintClient):
     """Client for the arXiv Atom v1 search API.
 
-    Requires no API key. arXiv's terms of service ask for polite
-    crawling (<= 1 req/3 sec for bulk; 3/sec is the hard cap).
+    Requires no API key. The arXiv API User's Manual asks for no more
+    than one request every three seconds over a single connection, so all
+    instances in the process share one limiter capped at one request in
+    flight; exceeding it gets HTTP 429 and connection stalls.
     """
 
     name: ClassVar[str] = "arxiv"
+    shared_limiter_key: ClassVar[str | None] = "arxiv"
 
     def __init__(self, config: Config) -> None:
         super().__init__(
@@ -47,6 +50,7 @@ class ArXivClient(PreprintClient):
             base_url=BASE_URL,
             rate_limit=config.arxiv_rate_limit,
             burst=1,
+            max_concurrent=1,
         )
 
     def _default_headers(self) -> dict[str, str]:

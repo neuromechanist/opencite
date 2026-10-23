@@ -13,6 +13,7 @@ from typing import ClassVar
 
 import pytest
 
+from opencite.clients.arxiv import ArXivClient
 from opencite.clients.base import BaseClient, RateLimiter
 from opencite.clients.biorxiv import BioRxivClient
 from opencite.clients.crossref import CrossRefClient
@@ -181,3 +182,20 @@ class TestCrossRefBudget:
     def test_polite_pool_limits_with_contact_email(self):
         limiter = CrossRefClient(Config(contact_email="a@example.org")).rate_limiter
         assert (limiter.rate, limiter.max_concurrent) == (3.0, 3)
+
+
+class TestArxivBudget:
+    def setup_method(self):
+        BaseClient.reset_shared_limiters()
+
+    def teardown_method(self):
+        BaseClient.reset_shared_limiters()
+
+    def test_arxiv_instances_share_one_serial_limiter(self):
+        config = Config()
+        a = ArXivClient(config)
+        b = ArXivClient(config)
+        assert a.rate_limiter is b.rate_limiter
+        assert a.rate_limiter.max_concurrent == 1
+        # arXiv API policy: at most one request every three seconds.
+        assert a.rate_limiter.rate <= 1 / 3

@@ -27,10 +27,12 @@ class RateLimiter:
     """Token bucket rate limiter for async operations.
 
     The token state (rate, tokens, refill clock) is plain floats and safe
-    to share across event loops. The serializing `asyncio.Lock`, however,
-    binds to whichever event loop first acquires it; when the limiter is
-    re-used from a different loop (e.g. successive pytest-asyncio test
-    functions), the lock is transparently recreated.
+    to share across event loops. The serializing `asyncio.Lock` and the
+    concurrency `asyncio.Semaphore`, however, bind to whichever event loop
+    first uses them; when the limiter is re-used from a different loop (e.g.
+    successive pytest-asyncio test functions) they are transparently
+    recreated. Limits therefore hold within one event loop, not across
+    threads running separate loops at the same time.
     """
 
     def __init__(self, rate: float, burst: int = 1, max_concurrent: int | None = None):
@@ -51,6 +53,7 @@ class RateLimiter:
         self._lock_loop_id: int | None = None
         self._semaphore: asyncio.Semaphore | None = None
         self._semaphore_loop_id: int | None = None
+        self._resume_at = 0.0
 
     def _lock_for_loop(self) -> asyncio.Lock:
         loop_id = id(asyncio.get_running_loop())
@@ -80,9 +83,16 @@ class RateLimiter:
             await self.acquire()
             yield
 
+    def pause(self, seconds: float) -> None:
+        """Hold every caller of this limiter for *seconds* (e.g. after a 429)."""
+        self._resume_at = max(self._resume_at, time.monotonic() + seconds)
+
     async def acquire(self) -> None:
         """Wait until a token is available, then consume one."""
         async with self._lock_for_loop():
+            paused_for = self._resume_at - time.monotonic()
+            if paused_for > 0:
+                await asyncio.sleep(paused_for)
             now = time.monotonic()
             elapsed = now - self._last_refill
             self._tokens = min(self.burst, self._tokens + elapsed * self.rate)
@@ -107,7 +117,9 @@ class BaseClient(ABC):
     instance in the process (e.g. Semantic Scholar's ~1 req/sec budget)
     set `shared_limiter_key` to a unique string. The first instance to
     initialize creates the limiter at the given rate; later instances
-    reuse it regardless of who created them. Subclasses without a key
+    reuse it regardless of who created them, so the first instance's
+    config (e.g. CrossRef's public versus polite pool) fixes the limits for
+    the process until `reset_shared_limiters()`. Subclasses without a key
     keep per-instance limiters, matching the previous behavior.
     """
 
@@ -204,7 +216,9 @@ class BaseClient(ABC):
                         attempt + 1,
                         self.max_retries,
                     )
-                    await asyncio.sleep(retry_after)
+                    # Pause the limiter, not just this caller, so clients
+                    # sharing the budget back off too.
+                    self.rate_limiter.pause(retry_after)
                     continue
                 resp.raise_for_status()
                 return resp

@@ -177,11 +177,11 @@ class TestCrossRefBudget:
 
     def test_public_pool_limits_without_contact_email(self):
         limiter = CrossRefClient(Config(contact_email="")).rate_limiter
-        assert (limiter.rate, limiter.max_concurrent) == (1.0, 1)
+        assert (limiter.rate, limiter.max_concurrent) == (0.9, 1)
 
     def test_polite_pool_limits_with_contact_email(self):
         limiter = CrossRefClient(Config(contact_email="a@example.org")).rate_limiter
-        assert (limiter.rate, limiter.max_concurrent) == (3.0, 3)
+        assert (limiter.rate, limiter.max_concurrent) == (2.7, 3)
 
 
 class TestArxivBudget:
@@ -199,3 +199,13 @@ class TestArxivBudget:
         assert a.rate_limiter.max_concurrent == 1
         # arXiv API policy: at most one request every three seconds.
         assert a.rate_limiter.rate <= 1 / 3
+
+
+class TestPause:
+    @pytest.mark.asyncio
+    async def test_pause_delays_next_acquire_for_every_caller(self):
+        rl = RateLimiter(rate=1000.0, burst=10)
+        rl.pause(0.1)
+        start = time.monotonic()
+        await rl.acquire()
+        assert time.monotonic() - start >= 0.08

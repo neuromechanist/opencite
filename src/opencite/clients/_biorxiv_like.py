@@ -115,20 +115,8 @@ class _BiorxivLikePreprintClient(PreprintClient):
         Raises `APIError` when CrossRef fails so the orchestrator can report
         the source as failed rather than empty.
         """
-        params: dict[str, Any] = {
-            "query.bibliographic": query,
-            "filter": _CROSSREF_FILTER,
-            # bioRxiv and medRxiv hits come back interleaved and each client
-            # keeps only its own server's, so fetch a full page.
-            "rows": 100,
-            "select": (
-                "DOI,title,author,published,created,abstract,"
-                "container-title,resource,URL,is-referenced-by-count"
-            ),
-        }
-
         papers: list[Paper] = []
-        for item in await self._crossref.query_works(params):
+        for item in await self._crossref.query_works(_crossref_search_params(query)):
             paper = self._parse_crossref_item(item)
             if paper:
                 papers.append(paper)
@@ -368,16 +356,35 @@ class _BiorxivLikePreprintClient(PreprintClient):
         )
 
 
+def _crossref_search_params(query: str) -> dict[str, Any]:
+    """CrossRef ``/works`` params for an openRxiv keyword search.
+
+    The params do not depend on the server, so bioRxiv and medRxiv searches
+    for the same query coalesce into one CrossRef request.
+    """
+    return {
+        "query.bibliographic": query,
+        "filter": _CROSSREF_FILTER,
+        # bioRxiv and medRxiv hits come back interleaved and each client
+        # keeps only its own server's, so fetch a full page.
+        "rows": 100,
+        "select": (
+            "DOI,title,author,published,created,abstract,"
+            "container-title,resource,URL,is-referenced-by-count"
+        ),
+    }
+
+
 def _crossref_item_server(item: dict) -> str:
-    """Return ``"medrxiv"`` or ``"biorxiv"`` for a 10.1101 CrossRef item.
+    """Return ``"medrxiv"`` or ``"biorxiv"`` for an openRxiv CrossRef item.
 
     openRxiv deposits omit ``container-title``; the primary resource URL
-    (``http://medrxiv.org/lookup/doi/...``) and ``institution`` name still
-    identify the server. Older deposits carry the server as container-title.
+    (``http://medrxiv.org/lookup/doi/...``) still identifies the server.
+    Older deposits carry the server as container-title. (The ``institution``
+    field also names the server but cannot be requested via ``select``.)
     Unknown items default to bioRxiv.
     """
     primary_url = ((item.get("resource") or {}).get("primary") or {}).get("URL") or ""
     container = item.get("container-title") or []
-    institutions = [i.get("name") or "" for i in item.get("institution") or []]
-    signals = " ".join([primary_url, *container, *institutions]).lower()
+    signals = " ".join([primary_url, *container]).lower()
     return "medrxiv" if "medrxiv" in signals else "biorxiv"

@@ -12,7 +12,9 @@ This client provides:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import json
 import logging
 import re
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -27,10 +29,11 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.crossref.org"
 
-# CrossRef pool limits, as advertised in its x-rate-limit-limit and
-# x-concurrency-limit response headers: (requests/sec, max in flight).
-_PUBLIC_POOL_LIMITS = (1.0, 1)
-_POLITE_POOL_LIMITS = (3.0, 3)
+# CrossRef pool limits, from its x-rate-limit-limit and x-concurrency-limit
+# response headers (public 1 req/s and 1 in flight; polite 3 and 3), with
+# a 10% rate margin: (requests/sec, max in flight).
+_PUBLIC_POOL_LIMITS = (0.9, 1)
+_POLITE_POOL_LIMITS = (2.7, 3)
 
 
 class CrossRefClient(BaseClient):
@@ -43,6 +46,13 @@ class CrossRefClient(BaseClient):
     # bioRxiv/medRxiv keyword search also goes through CrossRef, so every
     # CrossRef caller in the process shares one budget.
     shared_limiter_key: ClassVar[str | None] = "crossref"
+
+    # In-flight /works queries keyed by (event loop, params). bioRxiv and
+    # medRxiv issue the identical query, so the second caller awaits the
+    # first's request instead of spending another slot of the budget.
+    _inflight: ClassVar[
+        dict[tuple[int, str], asyncio.Future[list[dict[str, Any]]]]
+    ] = {}
 
     def __init__(self, config: Config):
         rate, max_concurrent = (
@@ -94,8 +104,25 @@ class CrossRefClient(BaseClient):
     async def query_works(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         """Run a raw ``/works`` query and return the item dicts.
 
-        Raises `APIError` on HTTP failure and `ValueError` on a non-JSON body.
+        Identical concurrent queries share one request. Raises `APIError` on
+        HTTP failure and `ValueError` on a non-JSON body.
         """
+        key = (id(asyncio.get_running_loop()), json.dumps(params, sort_keys=True))
+        pending = CrossRefClient._inflight.get(key)
+        if pending is not None:
+            return list(await asyncio.shield(pending))
+
+        future = asyncio.ensure_future(self._fetch_works(params))
+        CrossRefClient._inflight[key] = future
+        try:
+            # Shield so a cancelled first caller doesn't cancel the request
+            # for others awaiting it.
+            return list(await asyncio.shield(future))
+        finally:
+            if CrossRefClient._inflight.get(key) is future:
+                del CrossRefClient._inflight[key]
+
+    async def _fetch_works(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         resp = await self.get("/works", params=params)
         return (resp.json().get("message") or {}).get("items") or []
 

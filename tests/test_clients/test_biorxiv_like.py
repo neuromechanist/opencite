@@ -19,8 +19,13 @@ import httpx
 import pytest
 import respx
 
-from opencite.clients._biorxiv_like import _crossref_item_server
+from opencite.clients._biorxiv_like import (
+    _crossref_item_server,
+    _crossref_search_params,
+)
+from opencite.clients.base import BaseClient
 from opencite.clients.biorxiv import BioRxivClient
+from opencite.clients.crossref import CrossRefClient
 from opencite.clients.medrxiv import MedRxivClient
 from opencite.config import Config
 from opencite.utils import is_openrxiv_doi
@@ -252,15 +257,56 @@ class TestCrossrefItemServer:
     def test_openrxiv_biorxiv_by_resource_url(self):
         assert _crossref_item_server(self._OPENRXIV_BIORXIV_ITEM) == "biorxiv"
 
-    def test_institution_alone_identifies_medrxiv(self):
-        item = {"institution": [{"name": "medRxiv"}]}
-        assert _crossref_item_server(item) == "medrxiv"
-
     def test_legacy_container_title(self):
         assert _crossref_item_server({"container-title": ["medRxiv"]}) == "medrxiv"
 
     def test_unknown_defaults_to_biorxiv(self):
         assert _crossref_item_server({}) == "biorxiv"
+
+
+class TestCrossrefSearchParams:
+    def test_filter_covers_both_owner_prefixes(self):
+        params = _crossref_search_params("memory")
+        assert params["filter"] == (
+            "prefix:10.1101,prefix:10.64898,type:posted-content"
+        )
+        assert "resource" in params["select"].split(",")
+        assert params["query.bibliographic"] == "memory"
+
+
+class TestSharedCrossrefSearch:
+    """bioRxiv and medRxiv search through one shared CrossRefClient budget."""
+
+    def setup_method(self):
+        BaseClient.reset_shared_limiters()
+        CrossRefClient._inflight.clear()
+
+    def teardown_method(self):
+        BaseClient.reset_shared_limiters()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_429_is_retried_and_identical_queries_coalesce(self, _config):
+        import asyncio
+
+        items = [
+            TestCrossrefItemServer._OPENRXIV_BIORXIV_ITEM | {"title": ["B paper"]},
+            TestCrossrefItemServer._OPENRXIV_MEDRXIV_ITEM | {"title": ["M paper"]},
+        ]
+        route = respx.get("https://api.crossref.org/works").mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "0"}),
+                httpx.Response(200, json={"message": {"items": items}}),
+            ]
+        )
+        async with BioRxivClient(_config) as bio, MedRxivClient(_config) as med:
+            bio_papers, med_papers = await asyncio.gather(
+                bio.search("memory"), med.search("memory")
+            )
+        # One 429 plus one successful request serve both servers.
+        assert route.call_count == 2
+        assert [p.title for p in bio_papers] == ["B paper"]
+        assert [p.title for p in med_papers] == ["M paper"]
 
 
 @pytest.mark.integration

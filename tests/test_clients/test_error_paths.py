@@ -21,14 +21,14 @@ BASE_URL = "https://test-api.example.com"
 class _TestClient(BaseClient):
     """Concrete BaseClient subclass for testing."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, max_retries: int = 3):
         super().__init__(
             config=config,
             base_url=BASE_URL,
             rate_limit=1000.0,
             burst=100,
             timeout=5.0,
-            max_retries=3,
+            max_retries=max_retries,
         )
 
     def _default_headers(self) -> dict[str, str]:
@@ -180,7 +180,7 @@ class TestNetworkErrors:
     @respx.mock
     async def test_empty_timeout_message_names_exception(self, test_config: Config):
         respx.get(f"{BASE_URL}/data").mock(side_effect=httpx.ReadTimeout(""))
-        async with _TestClient(test_config) as client:
+        async with _TestClient(test_config, max_retries=1) as client:
             with pytest.raises(APIError) as excinfo:
                 await client.get("/data")
         assert excinfo.value.details == "ReadTimeout"
@@ -220,7 +220,7 @@ class TestCredentialRedaction:
     @respx.mock
     async def test_api_key_not_in_exhausted_5xx_details(self, test_config: Config):
         respx.get(f"{BASE_URL}/data").mock(return_value=httpx.Response(503))
-        async with _TestClient(test_config) as client:
+        async with _TestClient(test_config, max_retries=1) as client:
             with pytest.raises(APIError) as excinfo:
                 await client.get("/data", params={"api_key": "s3cret"})
         assert "s3cret" not in str(excinfo.value)

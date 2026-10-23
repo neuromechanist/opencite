@@ -6,9 +6,15 @@ import httpx
 import pytest
 import respx
 
-from opencite.clients.osf import OSFClient, _share_result_ids
+from opencite.clients.osf import (
+    OSFClient,
+    _rank_by_share_order,
+    _share_result_ids,
+    _share_search_params,
+)
 from opencite.clients.preprint_base import FulltextRoute
 from opencite.config import Config
+from opencite.exceptions import APIError
 from opencite.models import IDSet, Paper
 
 _BASE = "https://api.osf.io"
@@ -155,6 +161,30 @@ class TestOSFParse:
         assert client.fulltext_route(paper) == FulltextRoute.NONE
 
 
+def _single_result_payload(resource_url: str) -> dict:
+    return {
+        "data": {
+            "relationships": {
+                "searchResultPage": {"data": [{"id": "r0", "type": "search-result"}]}
+            }
+        },
+        "included": [
+            {
+                "id": "r0",
+                "type": "search-result",
+                "relationships": {
+                    "indexCard": {"data": {"id": "c0", "type": "index-card"}}
+                },
+            },
+            {
+                "id": "c0",
+                "type": "index-card",
+                "attributes": {"resourceMetadata": {"@id": resource_url}},
+            },
+        ],
+    }
+
+
 class TestShareResultIds:
     def test_extracts_ids_in_rank_order(self):
         assert _share_result_ids(_SHARE_PAYLOAD) == ["g6dhv", "9fe8n"]
@@ -162,7 +192,16 @@ class TestShareResultIds:
     def test_empty_payload(self):
         assert _share_result_ids({"data": {}, "included": []}) == []
 
-    def test_skips_non_osf_resources(self):
+    def test_accepts_http_and_trailing_slash(self):
+        payload = _single_result_payload("http://osf.io/abc12/")
+        assert _share_result_ids(payload) == ["abc12"]
+
+    def test_unparseable_page_raises(self):
+        payload = _single_result_payload("https://osf.io/preprints/psyarxiv/abc12")
+        with pytest.raises(APIError, match="no OSF IDs"):
+            _share_result_ids(payload)
+
+    def test_page_of_only_non_osf_resources_raises(self):
         payload = {
             "data": {
                 "relationships": {
@@ -188,7 +227,32 @@ class TestShareResultIds:
                 },
             ],
         }
-        assert _share_result_ids(payload) == []
+        with pytest.raises(APIError):
+            _share_result_ids(payload)
+
+
+class TestShareSearchParams:
+    def test_restricts_to_osf_preprints(self):
+        params = _share_search_params("memory", 20)
+        assert params["cardSearchText"] == "memory"
+        assert params["cardSearchFilter[resourceType]"] == "Preprint"
+        assert params["cardSearchFilter[accessService]"] == "https://osf.io"
+        assert params["page[size]"] == 20
+        assert "cardSearchFilter[publisher]" not in params
+
+    def test_provider_maps_to_publisher_filter(self):
+        params = _share_search_params("memory", 5, provider="psyarxiv")
+        assert (
+            params["cardSearchFilter[publisher]"] == "https://osf.io/preprints/psyarxiv"
+        )
+
+
+class TestRankByShareOrder:
+    def test_versioned_ids_follow_share_rank(self):
+        # Live v2 records carry version suffixes and arrive unordered.
+        items = [{"id": "9fe8n_v1"}, {"id": "zzzzz_v1"}, {"id": "g6dhv_v2"}]
+        ranked = _rank_by_share_order(items, ["g6dhv", "9fe8n"])
+        assert [i["id"] for i in ranked] == ["g6dhv_v2", "9fe8n_v1", "zzzzz_v1"]
 
 
 @pytest.mark.integration

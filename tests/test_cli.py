@@ -650,3 +650,39 @@ class TestSearchSourceSummary:
         captured = capsys.readouterr()
         assert "core: skipped" in captured.err
         assert json.loads(captured.out) == []
+
+
+def _isolated_cli(monkeypatch, tmp_path, argv: list[str]) -> None:
+    """Point the CLI at an empty config so user keys don't leak into tests."""
+    monkeypatch.setattr("opencite.config.CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("OPENCITE_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["opencite", *argv])
+
+
+class TestSearchExitStatus:
+    def test_failed_only_source_exits_nonzero(self, monkeypatch, tmp_path, capsys):
+        import httpx
+        import respx
+
+        from opencite.cli import main
+
+        _isolated_cli(monkeypatch, tmp_path, ["search", "memory", "--source", "zenodo"])
+        with respx.mock:
+            respx.get("https://zenodo.org/api/records").mock(
+                return_value=httpx.Response(400)
+            )
+            assert main() == 1
+        assert "zenodo: failed" in capsys.readouterr().err
+
+    @pytest.mark.integration
+    def test_zero_matches_exits_zero(self, monkeypatch, tmp_path, capsys):
+        from opencite.cli import main
+
+        _isolated_cli(
+            monkeypatch,
+            tmp_path,
+            ["search", "qzxwvplorbnatzk ytrewqkjh", "--source", "zenodo"],
+        )
+        assert main() == 0
+        assert "zenodo: 0" in capsys.readouterr().err

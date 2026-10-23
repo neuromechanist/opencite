@@ -1,8 +1,9 @@
 """Shared base for bioRxiv-style preprint clients (bioRxiv + medRxiv).
 
-bioRxiv and medRxiv share the same DOI prefixes (10.1101, and 10.64898 for
-newer openRxiv preprints), the same CrossRef keyword-search path, and the same Content API (`api.biorxiv.org`) URL shape.
-The only differences are:
+bioRxiv and medRxiv share the same DOI prefixes (10.1101, and 10.64898
+for newer openRxiv preprints), the same CrossRef keyword-search path, and
+the same Content API (`api.biorxiv.org`) URL shape. The only differences
+are:
 
 - the `server` segment in Content API URLs (`/details/{server}/{doi}`)
 - the public site domain used for landing-page and PDF URLs

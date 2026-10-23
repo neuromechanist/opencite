@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from opencite.clients.crossref import _parse_work
+import asyncio
+
+import httpx
+import pytest
+import respx
+
+from opencite.clients.base import BaseClient
+from opencite.clients.crossref import CrossRefClient, _parse_work
+from opencite.config import Config
+from opencite.exceptions import APIError
 
 # -- Unit tests for _parse_work (no API needed) --
 
@@ -100,3 +109,65 @@ def test_parse_work_publication_date():
     paper = _parse_work(SAMPLE_WORK)
     assert paper is not None
     assert paper.publication_date == "2010-6"
+
+
+class TestQueryCoalescing:
+    """Identical concurrent /works queries share one request."""
+
+    _URL = "https://api.crossref.org/works"
+    _PARAMS = {"query": "memory", "rows": 1}
+
+    def setup_method(self):
+        BaseClient.reset_shared_limiters()
+        CrossRefClient._inflight.clear()
+
+    def teardown_method(self):
+        BaseClient.reset_shared_limiters()
+
+    @staticmethod
+    def _slow_ok(delay: float):
+        async def respond(_request):
+            await asyncio.sleep(delay)
+            return httpx.Response(200, json={"message": {"items": [{"DOI": "x"}]}})
+
+        return respond
+
+    @respx.mock
+    async def test_shared_error_reaches_every_waiter(self):
+        route = respx.get(self._URL).mock(return_value=httpx.Response(400))
+        async with CrossRefClient(Config()) as client:
+            results = await asyncio.gather(
+                client.query_works(self._PARAMS),
+                client.query_works(self._PARAMS),
+                return_exceptions=True,
+            )
+        assert all(isinstance(r, APIError) for r in results)
+        assert route.call_count == 1
+        assert CrossRefClient._inflight == {}
+
+    @respx.mock
+    async def test_cancelled_first_waiter_leaves_result_for_second(self):
+        route = respx.get(self._URL).mock(side_effect=self._slow_ok(0.05))
+        async with CrossRefClient(Config()) as client:
+            first = asyncio.create_task(client.query_works(self._PARAMS))
+            second = asyncio.create_task(client.query_works(self._PARAMS))
+            await asyncio.sleep(0.01)
+            first.cancel()
+            assert await second == [{"DOI": "x"}]
+        assert route.call_count == 1
+        assert CrossRefClient._inflight == {}
+
+    @respx.mock
+    async def test_request_cancelled_when_every_waiter_leaves(self):
+        respx.get(self._URL).mock(side_effect=self._slow_ok(1.0))
+        async with CrossRefClient(Config()) as client:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(client.query_works(self._PARAMS), 0.05)
+            assert CrossRefClient._inflight == {}
+        # Let the cancellation land, then nothing may still run against the
+        # closed client session.
+        await asyncio.sleep(0)
+        pending = [
+            t for t in asyncio.all_tasks() if not t.done() and "_fetch_works" in repr(t)
+        ]
+        assert pending == []

@@ -17,6 +17,7 @@ import contextlib
 import json
 import logging
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
@@ -36,6 +37,14 @@ _PUBLIC_POOL_LIMITS = (0.9, 1)
 _POLITE_POOL_LIMITS = (2.7, 3)
 
 
+@dataclass
+class _InflightQuery:
+    """A shared ``/works`` request and the number of callers awaiting it."""
+
+    future: asyncio.Future[list[dict[str, Any]]]
+    waiters: int = 0
+
+
 class CrossRefClient(BaseClient):
     """Client for the CrossRef REST API.
 
@@ -50,9 +59,7 @@ class CrossRefClient(BaseClient):
     # In-flight /works queries keyed by (event loop, params). bioRxiv and
     # medRxiv issue the identical query, so the second caller awaits the
     # first's request instead of spending another slot of the budget.
-    _inflight: ClassVar[
-        dict[tuple[int, str], asyncio.Future[list[dict[str, Any]]]]
-    ] = {}
+    _inflight: ClassVar[dict[tuple[int, str], _InflightQuery]] = {}
 
     def __init__(self, config: Config):
         rate, max_concurrent = (
@@ -108,19 +115,28 @@ class CrossRefClient(BaseClient):
         HTTP failure and `ValueError` on a non-JSON body.
         """
         key = (id(asyncio.get_running_loop()), json.dumps(params, sort_keys=True))
-        pending = CrossRefClient._inflight.get(key)
-        if pending is not None:
-            return list(await asyncio.shield(pending))
-
-        future = asyncio.ensure_future(self._fetch_works(params))
-        CrossRefClient._inflight[key] = future
+        entry = CrossRefClient._inflight.get(key)
+        if entry is None:
+            future = asyncio.ensure_future(self._fetch_works(params))
+            # Every waiter may be gone by the time the request fails; retrieve
+            # the exception so asyncio doesn't log it as never retrieved.
+            future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
+            entry = _InflightQuery(future)
+            CrossRefClient._inflight[key] = entry
+        entry.waiters += 1
         try:
-            # Shield so a cancelled first caller doesn't cancel the request
-            # for others awaiting it.
-            return list(await asyncio.shield(future))
+            # Shield so one cancelled waiter doesn't cancel the request for
+            # the others still awaiting it.
+            return list(await asyncio.shield(entry.future))
         finally:
-            if CrossRefClient._inflight.get(key) is future:
-                del CrossRefClient._inflight[key]
+            entry.waiters -= 1
+            if entry.waiters == 0:
+                # Last waiter out: drop the entry and cancel a request nobody
+                # awaits, so it never outlives its callers' client session.
+                if CrossRefClient._inflight.get(key) is entry:
+                    del CrossRefClient._inflight[key]
+                if not entry.future.done():
+                    entry.future.cancel()
 
     async def _fetch_works(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         resp = await self.get("/works", params=params)

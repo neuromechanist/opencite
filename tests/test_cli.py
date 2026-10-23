@@ -638,7 +638,8 @@ class TestSearchSourceSummary:
         from opencite.cli import main
 
         # Isolate from any user config or .env that might set a CORE key.
-        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr("opencite.config.CONFIG_DIR", tmp_path)
+        monkeypatch.setenv("OPENCITE_CONFIG", str(tmp_path / "config.toml"))
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("CORE_API_KEY", raising=False)
         monkeypatch.setattr(

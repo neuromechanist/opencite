@@ -98,32 +98,16 @@ class OSFClient(PreprintClient):
                 f"{_OSF_ORIGIN}/preprints/{provider}"
             )
 
-        try:
-            resp = await self.get(SHARE_SEARCH_URL, params=params)
-            ranked_ids = _share_result_ids(resp.json())
-        except APIError as e:
-            logger.warning("OSF search failed for query %r: %s", query, e.message)
-            return []
-        except ValueError:
-            logger.warning("OSF search returned non-JSON for query %r", query)
-            return []
+        resp = await self.get(SHARE_SEARCH_URL, params=params)
+        ranked_ids = _share_result_ids(resp.json())
         if not ranked_ids:
             return []
 
-        try:
-            resp = await self.get(
-                "/v2/preprints/",
-                params={"filter[id]": ",".join(ranked_ids), "page[size]": size},
-            )
-            items = resp.json().get("data") or []
-        except APIError as e:
-            logger.warning(
-                "OSF preprint fetch failed for query %r: %s", query, e.message
-            )
-            return []
-        except ValueError:
-            logger.warning("OSF preprint fetch returned non-JSON for query %r", query)
-            return []
+        resp = await self.get(
+            "/v2/preprints/",
+            params={"filter[id]": ",".join(ranked_ids), "page[size]": size},
+        )
+        items = resp.json().get("data") or []
 
         # filter[id] returns records in arbitrary order; restore SHARE's ranking.
         rank = {osf_id: i for i, osf_id in enumerate(ranked_ids)}

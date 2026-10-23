@@ -107,6 +107,7 @@ class SearchOrchestrator:
 
         Returns a SearchResult with deduplicated, merged papers.
         """
+        explicit_sources = sources is not None
         if sources is None:
             sources = ALL_SOURCES
         # Honor disabled_sources as a baseline filter that can't be
@@ -115,6 +116,15 @@ class SearchOrchestrator:
         disabled = {canonicalize(d) for d in self.config.disabled_sources}
         if disabled:
             sources = tuple(s for s in sources if canonicalize(s) not in disabled)
+
+        skipped: dict[str, str] = {}
+        if "core" in sources and not self._core.enabled:
+            # CORE rejects keyless requests. Only mention it when the caller
+            # asked for it by name; default searches just leave it out.
+            if explicit_sources:
+                skipped["core"] = "CORE_API_KEY not set"
+                logger.warning("Skipping core: CORE_API_KEY not set")
+            sources = tuple(s for s in sources if s != "core")
 
         tasks: dict[str, asyncio.Task[list[Paper]]] = {}
 
@@ -161,6 +171,7 @@ class SearchOrchestrator:
 
         all_papers: list[Paper] = []
         source_counts: dict[str, int] = {}
+        failed: dict[str, str] = {}
 
         try:
             for source_name, task in tasks.items():
@@ -169,8 +180,11 @@ class SearchOrchestrator:
                     source_counts[source_name] = len(papers)
                     all_papers.extend(papers)
                 except Exception as exc:
-                    logger.warning("Search failed for source %s: %s", source_name, exc)
-                    source_counts[source_name] = 0
+                    reason = str(exc) or type(exc).__name__
+                    logger.warning(
+                        "Search failed for source %s: %s", source_name, reason
+                    )
+                    failed[source_name] = reason
         finally:
             # Make sure no per-source task outlives this call. If the caller
             # cancels search() (e.g. via asyncio.wait_for) part-way through the
@@ -198,6 +212,8 @@ class SearchOrchestrator:
             papers=unique,
             total_by_source=source_counts,
             deduplicated_count=total_before - len(unique),
+            failed_sources=failed,
+            skipped_sources=skipped,
         )
 
     async def lookup(

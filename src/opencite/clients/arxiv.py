@@ -83,11 +83,7 @@ class ArXivClient(PreprintClient):
             "sortOrder": "descending",
         }
 
-        try:
-            resp = await self.get("/query", params=params)
-        except APIError as e:
-            logger.warning("arXiv search failed for query %r: %s", query, e.message)
-            return []
+        resp = await self.get("/query", params=params)
         return self._parse_feed(resp.text, year_from=year_from, year_to=year_to)
 
     async def lookup_arxiv_id(self, arxiv_id: str) -> Paper | None:

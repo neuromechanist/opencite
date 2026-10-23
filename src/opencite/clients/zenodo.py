@@ -72,18 +72,8 @@ class ZenodoClient(PreprintClient):
             "subtype": "preprint",
             "size": min(max_results, 100),
         }
-        try:
-            resp = await self.get("/api/records", params=params)
-        except APIError as e:
-            logger.warning("Zenodo search failed for query %r: %s", query, e.message)
-            return []
-
-        try:
-            data = resp.json()
-        except ValueError:
-            logger.warning("Zenodo search returned non-JSON for query %r", query)
-            return []
-
+        resp = await self.get("/api/records", params=params)
+        data = resp.json()
         hits = ((data.get("hits") or {}).get("hits")) or []
         papers: list[Paper] = []
         for record in hits:

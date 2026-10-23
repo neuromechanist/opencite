@@ -313,9 +313,10 @@ async def _cmd_search(args: argparse.Namespace, config: object) -> int:
         dedup_msg = ""
         if result.deduplicated_count > 0:
             dedup_msg = f" ({result.deduplicated_count} duplicates removed)"
-        source_info = ", ".join(
-            f"{k}: {v}" for k, v in sorted(result.total_by_source.items())
-        )
+        status = {k: str(v) for k, v in result.total_by_source.items()}
+        status.update(dict.fromkeys(result.failed_sources, "failed"))
+        status.update(dict.fromkeys(result.skipped_sources, "skipped"))
+        source_info = ", ".join(f"{k}: {v}" for k, v in sorted(status.items()))
         print(f"Sources: {source_info}{dedup_msg}", file=sys.stderr)
 
     _write_output(output, args.output)

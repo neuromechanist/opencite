@@ -68,20 +68,12 @@ class FigshareClient(PreprintClient):
             "item_type": _PREPRINT_ITEM_TYPE,
             "page_size": min(max_results, 100),
         }
-        try:
-            resp = await self.post("/v2/articles/search", json=body)
-        except APIError as e:
-            logger.warning("Figshare search failed for query %r: %s", query, e.message)
-            return []
-
-        try:
-            items = resp.json()
-        except ValueError:
-            logger.warning("Figshare search returned non-JSON for query %r", query)
-            return []
+        resp = await self.post("/v2/articles/search", json=body)
+        items = resp.json()
         if not isinstance(items, list):
-            logger.warning("Figshare search returned unexpected payload for %r", query)
-            return []
+            raise APIError(
+                f"Figshare search returned {type(items).__name__}, expected a list"
+            )
 
         # Search returns summary items; each needs a per-article GET to
         # populate authors / files / tags. Fan out concurrently -- the

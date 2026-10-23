@@ -48,6 +48,3 @@ Thumbs.db
 
 # UV
 uv.lock
-
-# Legacy MCP state
-.serena/

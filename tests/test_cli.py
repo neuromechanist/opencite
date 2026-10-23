@@ -629,3 +629,23 @@ class TestCLIIntegration:
         )
         assert result.returncode == 0
         assert len(result.stdout.strip()) > 0
+
+
+class TestSearchSourceSummary:
+    def test_skipped_only_source_reports_and_exits_nonzero(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        from opencite.cli import main
+
+        # Isolate from any user config or .env that might set a CORE key.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("CORE_API_KEY", raising=False)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["opencite", "search", "memory", "--source", "core", "-f", "json"],
+        )
+        assert main() == 1
+        captured = capsys.readouterr()
+        assert "core: skipped" in captured.err
+        assert json.loads(captured.out) == []

@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from opencite.clients.core import _parse_work
+import httpx
+import pytest
+import respx
+
+from opencite.clients.core import COREClient, _parse_work
+from opencite.config import Config
+
+_BASE = "https://api.core.ac.uk"
 
 # -- Unit tests for _parse_work (no API needed) --
 
@@ -98,3 +105,41 @@ def test_parse_work_http_doi_prefix():
     paper = _parse_work(work)
     assert paper is not None
     assert paper.doi == "10.1234/test"
+
+
+# -- Regression: CORE 301s the un-slashed search path --
+
+
+class TestCoreSearchRedirect:
+    """CORE moved /v3/search/works to /v3/search/works/ and 301s the old path.
+
+    The shared client in `clients.base` did not set ``follow_redirects``, which
+    httpx defaults to False, so the 301 was raised as an APIError and the source
+    returned zero results with a valid API key.
+    """
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_search_hits_the_canonical_slashed_path(self):
+        route = respx.get(f"{_BASE}/v3/search/works/").mock(
+            return_value=httpx.Response(200, json={"results": [SAMPLE_WORK]})
+        )
+        async with COREClient(Config(core_api_key="k")) as client:
+            papers = await client.search("brain computer interface")
+        assert route.called
+        assert len(papers) == 1
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_search_follows_a_301_instead_of_erroring(self):
+        respx.get(f"{_BASE}/v3/search/works").mock(
+            return_value=httpx.Response(
+                301, headers={"Location": f"{_BASE}/v3/search/works/"}
+            )
+        )
+        respx.get(f"{_BASE}/v3/search/works/").mock(
+            return_value=httpx.Response(200, json={"results": [SAMPLE_WORK]})
+        )
+        async with COREClient(Config(core_api_key="k")) as client:
+            resp = await client.get("/v3/search/works", params={"q": "x"})
+        assert resp.status_code == 200

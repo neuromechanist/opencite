@@ -124,6 +124,12 @@ class BaseClient(ABC):
             base_url=self.base_url,
             timeout=self.timeout,
             headers=self._default_headers(),
+            # Upstream APIs move endpoints behind 3xx (CORE now 301s
+            # /v3/search/works -> /v3/search/works/). Without this the redirect
+            # surfaces as an APIError and the source silently returns nothing.
+            # httpx strips Authorization on cross-origin redirects, so this does
+            # not leak an API key to a third-party host.
+            follow_redirects=True,
         )
         return self
 

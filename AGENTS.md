@@ -10,7 +10,7 @@ It also supports PDF retrieval, HTML full-text shortcuts for arXiv (ar5iv) and b
 ## Build and Run
 
 ```bash
-uv sync --extra dev              # install package + dev deps
+uv sync --extra dev --extra pdf  # install package + dev deps + PDF converters (as CI does)
 uv run opencite --version        # verify CLI works
 uv run opencite search "query"   # search for papers
 uv run opencite lookup DOI       # look up a specific paper
@@ -24,7 +24,8 @@ uv run opencite config init      # create config template
 ## Testing and Linting
 
 ```bash
-uv run pytest                    # run all tests
+uv run pytest -m "not integration"  # unit tests (what CI runs)
+uv run pytest                    # all tests, including live API calls
 uv run pytest tests/test_models.py -v    # single test file
 uv run pytest -k "test_doi"      # single test by name
 uv run pytest -m integration     # API integration tests only
@@ -33,10 +34,15 @@ uv run ruff check src/ tests/    # lint
 uv run ruff check --fix src/ tests/  # auto-fix lint
 uv run ruff format src/ tests/   # format
 uv run ty check                  # type check
-uv run mkdocs serve              # preview docs
+uv run --group docs mkdocs serve # preview docs
 ```
 
+CI (`.github/workflows/tests.yml`) runs only `ruff check` and `pytest -m "not integration"` on Python 3.11 to 3.13, plus a separate integration job.
+`ruff format` and `ty check` run locally through pre-commit.
+Docs deploy from `.github/workflows/docs.yml` (`mkdocs build --strict` to GitHub Pages), not `mkdocs gh-deploy`.
+
 ## Development Workflow
+
 1. **Check context:** review `.context/plan.md` for current tasks and `.context/research.md` for API findings
 2. **Branch:** `gh issue develop <issue-number>`, or a descriptive branch for unticketed work
 3. **Code:** follow existing patterns (see `.rules/` for standards)
@@ -65,7 +71,7 @@ uv run mkdocs serve              # preview docs
 **Details:** `.rules/code_review.md`
 
 ## [NEVER DO THIS]
-- Never use mocks, stubs, or fake data in tests
+- Never use mocks that replace business logic, stubs, or fake data in tests (`respx` fixtures for error and retry paths are the exception)
 - Never use `pip`, `conda`, or `virtualenv`; use UV
 - Never commit secrets, `.env` files, or API keys
 - Never leave empty `except` blocks or silent failures
@@ -90,7 +96,10 @@ The concept DOI in `CITATION.cff` (`doi:`) and the README badge is stable across
 - `exceptions.py` -- `OpenCiteError` hierarchy: `APIError`, `RateLimitError`, `APIKeyError`, etc.
 - `cli.py` -- argparse with subcommands: search, lookup, cite, canonical, pdf, convert, ids, batch-fetch, config
 - `utils.py` -- title normalization, fuzzy matching, author name parsing, abstract reconstruction
-- `clients/` -- per-API async clients on top of `base.py` (`BaseClient`): openalex, semantic_scholar, pubmed, pmc, arxiv, biorxiv, medrxiv (shared `_biorxiv_like.py`), osf, zenodo, figshare (shared `preprint_base.py`), crossref, core, unpaywall, id_converter
+- `clients/` -- per-API async clients on top of `base.py` (`BaseClient`): openalex, semantic_scholar, pubmed, pmc, crossref, core, unpaywall, id_converter, and the preprint servers arxiv, biorxiv, medrxiv, osf, zenodo, figshare, which subclass `PreprintClient` in `preprint_base.py` (biorxiv and medrxiv also share `_biorxiv_like.py`)
+- `sources.py` -- source-name aliases (`_ALIASES`) and `disabled_sources` handling
+- `preprint_fulltext.py` -- HTML full-text retrieval for preprint servers (ar5iv, bioRxiv `.full`)
+- `__main__.py` -- console entry point (`opencite`)
 - `search.py` -- `SearchOrchestrator` for parallel multi-source search with dedup/merge; `ALL_SOURCES` lists the searchable sources
 - `citations.py` -- `CitationExplorer` for citation graph traversal and canonical paper discovery
 - `dedup.py` -- DOI + fuzzy title deduplication with paper merging
@@ -98,7 +107,7 @@ The concept DOI in `CITATION.cff` (`doi:`) and the README badge is stable across
 - `pdf.py` -- multi-source PDF retrieval pipeline with publisher-authenticated downloads; `retrieve_as_markdown()` tries PMC full text before PDF fallback
 - `fulltext.py` -- `FullTextRetriever` for PMC BioC full-text retrieval, bypasses PDF pipeline for OA articles
 - `pmc_convert.py` -- BioC JSON to markdown converter with section structure, figures, tables, and references
-- `convert.py` -- PDF-to-markdown (markitdown, markit-mistral; both included by default) with image extraction support
+- `convert.py` -- PDF-to-markdown (markitdown, markit-mistral; both in the optional `pdf` extra) with image extraction support
 - `batch.py` -- batch PDF download and conversion with controlled concurrency; prefers PMC full text when converting; organizes into pdf/, markdown/, markdown/img/ subdirs
 - `formatters/` -- output formatters (text, json, bibtex, csv)
 
@@ -107,7 +116,8 @@ The concept DOI in `CITATION.cff` (`doi:`) and the README badge is stable across
 - **Paper.data_sources** tracks which APIs contributed data (provenance)
 - **BaseClient** ABC provides rate limiting (token bucket), retry with backoff, httpx session management
 - Rate limits: OpenAlex 100 req/sec, PubMed 10 req/sec, Semantic Scholar 1 req/sec, arXiv 3 req/sec, bioRxiv 10 req/sec, PMC 3 req/sec
-- **Full-text retrieval** (when `--convert` is used): PMC BioC API for OA articles -> structured markdown (no PDF needed). Uses `--no-fulltext` to skip.
+- **Full-text retrieval** (when `--convert` is used): PMC BioC API for OA articles -> structured markdown (no PDF needed).
+  Uses `--no-fulltext` to skip.
 - PDF retrieval tries sources in priority: publisher APIs (if tokens configured) -> OpenAlex/S2 PDF locations -> PMC OA -> direct arXiv/bioRxiv URL -> DOI content negotiation
 - PDF-to-markdown `auto` mode: if `MISTRAL_API_KEY` is set, use markit-mistral (better for math/complex layouts); otherwise fall back to markitdown (free)
 - Config loading priority: TOML < `.env` files < environment variables
@@ -118,18 +128,22 @@ The concept DOI in `CITATION.cff` (`doi:`) and the README badge is stable across
 - **Semantic Scholar** -- `httpx` REST; TLDR summaries, SPECTER embeddings, batch 500 IDs, `citationStyles` for BibTeX
 - **PubMed/PMC** -- NCBI eutils XML; MeSH terms, ID Converter API; PMC BioC REST API for structured full-text (OA subset, ~4M+ articles)
 - **arXiv** -- Atom v1 API; search + direct lookup by arXiv ID; no key required; direct PDF at `arxiv.org/pdf/{id}`
-- **bioRxiv/medRxiv** -- CrossRef (`prefix:10.1101`) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required. Each is a first-class `--source`; container-title post-filtering keeps attribution clean.
-- **OSF Preprints** -- single client wrapping `api.osf.io/v2/preprints/`; covers PsyArXiv/SocArXiv/EarthArXiv/MetaArXiv. Provider slug recorded in `data_sources` as `osf:{provider}`; no key required.
+- **bioRxiv/medRxiv** -- CrossRef (`prefix:10.1101`) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required.
+  Each is a first-class `--source`; container-title post-filtering keeps attribution clean.
+- **OSF Preprints** -- single client wrapping `api.osf.io/v2/preprints/`; covers PsyArXiv/SocArXiv/EarthArXiv/MetaArXiv.
+  Provider slug recorded in `data_sources` as `osf:{provider}`; no key required.
 - **Zenodo** -- `zenodo.org/api/records` filtered to `resource_type=publication-preprint`; optional `ZENODO_ACCESS_TOKEN` for higher rate limits.
 - **Figshare** -- `api.figshare.com/v2/articles/search` filtered to `item_type=11` (preprint); no key required.
 
 ### Adding a New Search Source
-1. Create `src/opencite/clients/{name}.py` subclassing `BaseClient` (`openalex.py` is the most complete reference)
+1. Create `src/opencite/clients/{name}.py` subclassing `BaseClient`, or `PreprintClient` for a preprint server (`openalex.py` and `osf.py` are references)
 2. Add its rate limit to `Config` in `config.py` (and `_TOML_MAP` if configurable)
-3. Add the source to `ALL_SOURCES` in `search.py`
+3. Add the source to `ALL_SOURCES` in `search.py` and to `_ALIASES` in `sources.py`
 4. Instantiate it in `SearchOrchestrator.__init__`, `__aenter__`, and `__aexit__`
-5. Add a `_search_{name}` method and dispatch it in `SearchOrchestrator.search`
+5. Add a `_search_{name}` method and an `if "{name}" in sources:` task block in `SearchOrchestrator.search`
 6. Update `_lookup_by_type` if the source resolves identifiers
+7. Add it to the `--source` choices in `cli.py` and the source table in `docs/guides/searching.md`
+8. Add parser tests on real payloads and a live `@pytest.mark.integration` search test
 
 ## Configuration
 
@@ -154,10 +168,15 @@ Config loading priority (later overrides earlier):
 
 ## Dependencies
 
-Core: `httpx`, `pyalex`, `markitdown`, `markit-mistral>=0.2.2`
-Dev: `pytest`, `pytest-asyncio`, `pytest-cov`, `ruff`, `pre-commit`
+Core: `httpx`, `pyalex`
+PDF extra (`pdf`): `markitdown`, `markit-mistral>=0.2.3`
+Dev extra (`dev`): `pytest`, `pytest-asyncio`, `pytest-cov`, `pytest-timeout`, `respx`, `ruff`, `ty`, `pre-commit`
+Docs group (`docs`): `mkdocs-material`, `mkdocstrings[python]`
 
 ## [REFERENCE] Rules Directory
+
+`.rules/` holds generic templates; where they differ from this file (for example CI steps, `uv sync --dev`, or `mkdocs gh-deploy`), this file wins.
+
 - `.rules/testing.md` -- no-mock policy
 - `.rules/python.md` -- UV, ruff, ty
 - `.rules/git.md` -- commits, branches, merges
@@ -176,5 +195,9 @@ Dev: `pytest`, `pytest-asyncio`, `pytest-cov`, `ruff`, `pre-commit`
 
 - `.memory/` is the tracked, cross-agent store for durable operational observations.
 - Keep one fact per Markdown file with `name`, `description`, `type`, `recorded`, and `revalidate_after` frontmatter; add a one-line hook to `.memory/INDEX.md`.
-- `.context/decisions/` contains binding Architecture Decision Records, `.context/` contains non-binding analysis and plans, and `.memory/` contains non-binding observations. Promote a memory to an ADR when it encodes a choice; never treat a memory as policy.
-- Correct or delete a memory when it becomes false. Never store secrets, tokens, credentials, private transcripts, customer data, personal data, or information about a named individual.
+- `.context/decisions/` (when present) contains binding Architecture Decision Records,
+  `.context/` contains non-binding analysis and plans,
+  and `.memory/` contains non-binding observations.
+  Promote a memory to an ADR when it encodes a choice; never treat a memory as policy.
+- Correct or delete a memory when it becomes false.
+  Never store secrets, tokens, credentials, private transcripts, customer data, personal data, or information about a named individual.

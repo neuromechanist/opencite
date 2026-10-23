@@ -115,7 +115,9 @@ The concept DOI in `CITATION.cff` (`doi:`) and the README badge is stable across
 - **IDSet** is frozen (immutable) and centralizes all identifier types (DOI, PMID, PMCID, OpenAlex, S2, ArXiv) for cross-API lookup
 - **Paper.data_sources** tracks which APIs contributed data (provenance)
 - **BaseClient** ABC provides rate limiting (token bucket), retry with backoff, httpx session management
-- Rate limits: OpenAlex 100 req/sec, PubMed 10 req/sec, Semantic Scholar 1 req/sec, arXiv 3 req/sec, bioRxiv 10 req/sec, PMC 3 req/sec
+- Rate limits: OpenAlex 100 req/sec, PubMed 10 req/sec, Semantic Scholar 1 req/sec, arXiv 1 req/3 sec (one in flight), CrossRef 1 req/sec public or 3 req/sec with a contact email (both with a concurrency cap), PMC 3 req/sec
+- Clients that hit the same upstream budget (arXiv, CrossRef, Semantic Scholar) set `shared_limiter_key` so all instances share one limiter; a 429 pauses that limiter for everyone
+- Client `search()` methods raise on failure instead of returning `[]`; the orchestrator records them in `SearchResult.failed_sources` / `skipped_sources` and the CLI exits 1 when no source succeeded
 - **Full-text retrieval** (when `--convert` is used): PMC BioC API for OA articles -> structured markdown (no PDF needed).
   Uses `--no-fulltext` to skip.
 - PDF retrieval tries sources in priority: publisher APIs (if tokens configured) -> OpenAlex/S2 PDF locations -> PMC OA -> direct arXiv/bioRxiv URL -> DOI content negotiation
@@ -128,11 +130,12 @@ The concept DOI in `CITATION.cff` (`doi:`) and the README badge is stable across
 - **Semantic Scholar** -- `httpx` REST; TLDR summaries, SPECTER embeddings, batch 500 IDs, `citationStyles` for BibTeX
 - **PubMed/PMC** -- NCBI eutils XML; MeSH terms, ID Converter API; PMC BioC REST API for structured full-text (OA subset, ~4M+ articles)
 - **arXiv** -- Atom v1 API; search + direct lookup by arXiv ID; no key required; direct PDF at `arxiv.org/pdf/{id}`
-- **bioRxiv/medRxiv** -- CrossRef (`prefix:10.1101`) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required.
-  Each is a first-class `--source`; container-title post-filtering keeps attribution clean.
-- **OSF Preprints** -- single client wrapping `api.osf.io/v2/preprints/`; covers PsyArXiv/SocArXiv/EarthArXiv/MetaArXiv.
+- **bioRxiv/medRxiv** -- CrossRef (owner prefixes `10.1101` and `10.64898`, the latter for DOIs minted since the move to openRxiv) for keyword search; bioRxiv Content API for DOI lookup with biorxiv/medrxiv server fallback; no key required.
+  Each is a first-class `--source`; the server is read from `resource.primary.URL` (or container-title) so attribution stays clean.
+- **OSF Preprints** -- keyword search through SHARE (`share.osf.io/api/v3/index-card-search`), hydrated via `api.osf.io/v2/preprints/?filter[id]=`, because the v2 endpoint no longer supports `filter[q]`; covers PsyArXiv/SocArXiv/EarthArXiv/MetaArXiv.
   Provider slug recorded in `data_sources` as `osf:{provider}`; no key required.
-- **Zenodo** -- `zenodo.org/api/records` filtered to `resource_type=publication-preprint`; optional `ZENODO_ACCESS_TOKEN` for higher rate limits.
+- **Zenodo** -- `zenodo.org/api/records` filtered to `resource_type=publication-preprint`; plain queries require every term (`+term`); optional `ZENODO_ACCESS_TOKEN` for higher rate limits.
+- **CORE** -- `api.core.ac.uk/v3/search/works/` (trailing slash; the shared client follows redirects); requires `CORE_API_KEY`, and is left out of default searches without one.
 - **Figshare** -- `api.figshare.com/v2/articles/search` filtered to `item_type=11` (preprint); no key required.
 
 ### Adding a New Search Source

@@ -187,7 +187,6 @@ class Config:
     pubmed_rate_limit: float = 10.0
     arxiv_rate_limit: float = 3.0
     biorxiv_rate_limit: float = 10.0
-    crossref_rate_limit: float = 50.0
     core_rate_limit: float = 0.5
     unpaywall_rate_limit: float = 10.0
     osf_rate_limit: float = 5.0

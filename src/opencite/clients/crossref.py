@@ -15,7 +15,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.crossref.org"
 
+# CrossRef pool limits, as advertised in its x-rate-limit-limit and
+# x-concurrency-limit response headers: (requests/sec, max in flight).
+_PUBLIC_POOL_LIMITS = (1.0, 1)
+_POLITE_POOL_LIMITS = (3.0, 3)
+
 
 class CrossRefClient(BaseClient):
     """Client for the CrossRef REST API.
@@ -35,12 +40,20 @@ class CrossRefClient(BaseClient):
     for works not indexed by the existing five sources.
     """
 
+    # bioRxiv/medRxiv keyword search also goes through CrossRef, so every
+    # CrossRef caller in the process shares one budget.
+    shared_limiter_key: ClassVar[str | None] = "crossref"
+
     def __init__(self, config: Config):
+        rate, max_concurrent = (
+            _POLITE_POOL_LIMITS if config.contact_email else _PUBLIC_POOL_LIMITS
+        )
         super().__init__(
             config=config,
             base_url=BASE_URL,
-            rate_limit=config.crossref_rate_limit,
-            burst=10,
+            rate_limit=rate,
+            burst=1,
+            max_concurrent=max_concurrent,
         )
 
     def _default_headers(self) -> dict[str, str]:
@@ -75,15 +88,16 @@ class CrossRefClient(BaseClient):
         if filters:
             params["filter"] = ",".join(filters)
 
-        try:
-            resp = await self.get("/works", params=params)
-            data = resp.json()
-        except Exception as e:
-            logger.warning("CrossRef search failed: %s", e)
-            return []
-
-        items = data.get("message", {}).get("items", [])
+        items = await self.query_works(params)
         return [p for item in items if (p := _parse_work(item)) is not None]
+
+    async def query_works(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Run a raw ``/works`` query and return the item dicts.
+
+        Raises `APIError` on HTTP failure and `ValueError` on a non-JSON body.
+        """
+        resp = await self.get("/works", params=params)
+        return (resp.json().get("message") or {}).get("items") or []
 
     async def lookup_doi(self, doi: str) -> Paper | None:
         """Look up a single work by DOI."""

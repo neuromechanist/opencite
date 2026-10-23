@@ -14,7 +14,10 @@ from typing import ClassVar
 import pytest
 
 from opencite.clients.base import BaseClient, RateLimiter
+from opencite.clients.biorxiv import BioRxivClient
+from opencite.clients.crossref import CrossRefClient
 from opencite.clients.id_converter import IDConverterClient
+from opencite.clients.medrxiv import MedRxivClient
 from opencite.clients.openalex import OpenAlexClient
 from opencite.clients.pubmed import PubMedClient
 from opencite.clients.semantic_scholar import SemanticScholarClient
@@ -152,3 +155,29 @@ class TestConcurrencyCap:
 
         await asyncio.gather(*(hold() for _ in range(4)))
         assert peak > 1
+
+
+class TestCrossRefBudget:
+    """CrossRef, bioRxiv, and medRxiv searches all spend one CrossRef budget."""
+
+    def setup_method(self):
+        BaseClient.reset_shared_limiters()
+
+    def teardown_method(self):
+        BaseClient.reset_shared_limiters()
+
+    def test_preprint_clients_share_crossref_limiter(self):
+        config = Config()
+        crossref = CrossRefClient(config)
+        biorxiv = BioRxivClient(config)
+        medrxiv = MedRxivClient(config)
+        assert biorxiv._crossref.rate_limiter is crossref.rate_limiter
+        assert medrxiv._crossref.rate_limiter is crossref.rate_limiter
+
+    def test_public_pool_limits_without_contact_email(self):
+        limiter = CrossRefClient(Config(contact_email="")).rate_limiter
+        assert (limiter.rate, limiter.max_concurrent) == (1.0, 1)
+
+    def test_polite_pool_limits_with_contact_email(self):
+        limiter = CrossRefClient(Config(contact_email="a@example.org")).rate_limiter
+        assert (limiter.rate, limiter.max_concurrent) == (3.0, 3)

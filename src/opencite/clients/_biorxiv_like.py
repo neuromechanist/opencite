@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
+from opencite.clients.crossref import CrossRefClient
 from opencite.clients.preprint_base import (
     FulltextRoute,
     PreprintClient,
@@ -35,7 +36,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _BIORXIV_BASE = "https://api.biorxiv.org"
-_CROSSREF_BASE = "https://api.crossref.org"
 
 # CrossRef "type" for preprints
 _PREPRINT_TYPE = "posted-content"
@@ -64,16 +64,14 @@ class _BiorxivLikePreprintClient(PreprintClient):
             rate_limit=config.biorxiv_rate_limit,
             burst=5,
         )
-        self._crossref_client: httpx.AsyncClient | None = None
+        # Keyword search goes through CrossRef; using CrossRefClient shares
+        # its process-wide rate/concurrency budget and 429 retry handling.
+        self._crossref = CrossRefClient(config)
 
     async def __aenter__(self) -> _BiorxivLikePreprintClient:
         await super().__aenter__()
         try:
-            self._crossref_client = httpx.AsyncClient(
-                base_url=_CROSSREF_BASE,
-                timeout=self.timeout,
-                headers=self._default_headers(),
-            )
+            await self._crossref.__aenter__()
         except Exception:
             # The parent's session was opened above; close it before
             # propagating so we don't leak the underlying httpx client.
@@ -82,15 +80,12 @@ class _BiorxivLikePreprintClient(PreprintClient):
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        if self._crossref_client:
-            await self._crossref_client.aclose()
-            self._crossref_client = None
+        await self._crossref.__aexit__(*args)
         await super().__aexit__(*args)
 
     def _default_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
         if self.config.contact_email:
-            # CrossRef polite-pool header
             headers["User-Agent"] = f"opencite/0.1 (mailto:{self.config.contact_email})"
         return headers
 
@@ -109,10 +104,10 @@ class _BiorxivLikePreprintClient(PreprintClient):
         CrossRef returns both bioRxiv and medRxiv records under the shared
         ``prefix:10.1101`` filter, so each subclass post-filters to its own
         ``server`` to keep attribution clean.
-        """
-        if self._crossref_client is None:
-            raise RuntimeError("Client not initialized. Use 'async with'.")
 
+        Raises `APIError` when CrossRef fails so the orchestrator can report
+        the source as failed rather than empty.
+        """
         params: dict[str, Any] = {
             "query.bibliographic": query,
             "filter": f"prefix:10.1101,type:{_PREPRINT_TYPE}",
@@ -124,37 +119,9 @@ class _BiorxivLikePreprintClient(PreprintClient):
                 "container-title,URL,is-referenced-by-count"
             ),
         }
-        if self.config.contact_email:
-            params["mailto"] = self.config.contact_email
-
-        data: dict = {}
-        await self.rate_limiter.acquire()
-        try:
-            resp = await self._crossref_client.get("/works", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as e:
-            logger.warning(
-                "CrossRef search HTTP %d for query %r",
-                e.response.status_code,
-                query,
-            )
-            return []
-        except httpx.TimeoutException:
-            logger.warning("CrossRef search timed out for query %r", query)
-            return []
-        except httpx.RequestError as e:
-            logger.warning("CrossRef search network error for query %r: %s", query, e)
-            return []
-        except ValueError as e:
-            # json.JSONDecodeError is a subclass of ValueError
-            logger.warning(
-                "CrossRef search returned non-JSON for query %r: %s", query, e
-            )
-            return []
 
         papers: list[Paper] = []
-        for item in (data.get("message") or {}).get("items") or []:
+        for item in await self._crossref.query_works(params):
             paper = self._parse_crossref_item(item)
             if paper:
                 papers.append(paper)

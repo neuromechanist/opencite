@@ -6,6 +6,10 @@ MetaArXiv, etc. The provider slug is captured in `data_sources` as
 ``osf:{provider}`` so attribution stays specific without bloating the
 canonical `--source` matrix.
 
+The v2 preprints endpoint has no free-text filter, so keyword search goes
+through SHARE (`share.osf.io/api/v3/index-card-search`), the index behind
+osf.io search, and the ranked hits are hydrated from the v2 endpoint.
+
 API docs: https://developer.osf.io/#operation/preprints_list
 No API key required for public preprints.
 """
@@ -26,6 +30,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.osf.io"
+SHARE_SEARCH_URL = "https://share.osf.io/api/v3/index-card-search"
+_OSF_ORIGIN = "https://osf.io"
+_PAGE_SIZE_CAP = 100
+
+# OSF preprint IDs are 5+ lowercase alphanumerics, optionally with a
+# version suffix (``abc12_v2``).
+_VERSION_SUFFIX = re.compile(r"_v\d+$")
 
 # OSF preprints span several DataCite prefixes per provider:
 # 10.31234/osf.io/ -- PsyArXiv
@@ -74,27 +85,55 @@ class OSFClient(PreprintClient):
             provider: Optional provider slug (e.g. ``"psyarxiv"``,
                 ``"socarxiv"``) to filter results to one OSF preprint server.
         """
+        size = min(max_results, _PAGE_SIZE_CAP)
         params: dict[str, Any] = {
-            "filter[q]": query,
-            "page[size]": min(max_results, 100),
+            "cardSearchText": query,
+            "cardSearchFilter[resourceType]": "Preprint",
+            "cardSearchFilter[accessService]": _OSF_ORIGIN,
+            "page[size]": size,
+            "acceptMediatype": "application/vnd.api+json",
         }
         if provider:
-            params["filter[provider]"] = provider
+            params["cardSearchFilter[publisher]"] = (
+                f"{_OSF_ORIGIN}/preprints/{provider}"
+            )
 
         try:
-            resp = await self.get("/v2/preprints/", params=params)
+            resp = await self.get(SHARE_SEARCH_URL, params=params)
+            ranked_ids = _share_result_ids(resp.json())
         except APIError as e:
             logger.warning("OSF search failed for query %r: %s", query, e.message)
             return []
-
-        try:
-            data = resp.json()
         except ValueError:
             logger.warning("OSF search returned non-JSON for query %r", query)
             return []
+        if not ranked_ids:
+            return []
 
+        try:
+            resp = await self.get(
+                "/v2/preprints/",
+                params={"filter[id]": ",".join(ranked_ids), "page[size]": size},
+            )
+            items = resp.json().get("data") or []
+        except APIError as e:
+            logger.warning(
+                "OSF preprint fetch failed for query %r: %s", query, e.message
+            )
+            return []
+        except ValueError:
+            logger.warning("OSF preprint fetch returned non-JSON for query %r", query)
+            return []
+
+        # filter[id] returns records in arbitrary order; restore SHARE's ranking.
+        rank = {osf_id: i for i, osf_id in enumerate(ranked_ids)}
+        items.sort(
+            key=lambda item: rank.get(
+                _VERSION_SUFFIX.sub("", str(item.get("id", ""))), len(rank)
+            )
+        )
         papers: list[Paper] = []
-        for item in data.get("data") or []:
+        for item in items:
             paper = self._parse_item(item)
             if paper is not None:
                 papers.append(paper)
@@ -227,3 +266,36 @@ class OSFClient(PreprintClient):
     def is_osf_doi(doi: str) -> bool:
         """Return True if *doi* points to an OSF-hosted preprint."""
         return bool(_OSF_DOI_PATTERN.match(doi.strip()))
+
+
+def _share_result_ids(data: dict[str, Any]) -> list[str]:
+    """Extract OSF IDs, in rank order, from a SHARE index-card-search payload.
+
+    The JSON:API payload lists ranked ``search-result`` references under
+    ``data.relationships.searchResultPage``; each points at an ``index-card``
+    in ``included`` whose ``resourceMetadata["@id"]`` is the OSF URL.
+    """
+    included = {
+        (item.get("type"), item.get("id")): item for item in data.get("included") or []
+    }
+    page = (
+        ((data.get("data") or {}).get("relationships") or {}).get("searchResultPage")
+        or {}
+    ).get("data") or []
+
+    ids: list[str] = []
+    for ref in page:
+        result = included.get(("search-result", ref.get("id"))) or {}
+        card_ref = ((result.get("relationships") or {}).get("indexCard") or {}).get(
+            "data"
+        ) or {}
+        card = included.get(("index-card", card_ref.get("id"))) or {}
+        resource_url = (
+            (card.get("attributes") or {}).get("resourceMetadata") or {}
+        ).get("@id") or ""
+        prefix = f"{_OSF_ORIGIN}/"
+        if resource_url.startswith(prefix):
+            osf_id = resource_url[len(prefix) :].strip("/")
+            if osf_id and "/" not in osf_id and osf_id not in ids:
+                ids.append(osf_id)
+    return ids

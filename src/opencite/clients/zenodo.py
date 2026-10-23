@@ -12,6 +12,7 @@ Optional access token (`config.zenodo_access_token`) raises rate limits.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.preprint_base import FulltextRoute, PreprintClient
@@ -27,6 +28,10 @@ BASE_URL = "https://zenodo.org"
 
 # Zenodo Crossref-registered DOI prefix.
 _ZENODO_DOI_PREFIX = "10.5281/zenodo."
+
+# Elasticsearch query_string syntax; a query using any of it is passed
+# through untouched so power users keep full control.
+_QUERY_SYNTAX = re.compile(r'["():*?~^/\[\]{}\\]|\b(?:AND|OR|NOT)\b|(?:^|\s)[+-]')
 
 
 class ZenodoClient(PreprintClient):
@@ -62,7 +67,7 @@ class ZenodoClient(PreprintClient):
     ) -> list[Paper]:
         """Search Zenodo for preprint records matching *query*."""
         params: dict[str, Any] = {
-            "q": query,
+            "q": _require_all_terms(query),
             "type": "publication",
             "subtype": "preprint",
             "size": min(max_results, 100),
@@ -199,3 +204,17 @@ class ZenodoClient(PreprintClient):
             pdf_locations=pdf_locations,
             data_sources={"zenodo"},
         )
+
+
+def _require_all_terms(query: str) -> str:
+    """Make a plain keyword query match every term.
+
+    Zenodo's query_string search ORs bare terms, so ``"Kalayeh, Mahdi"``
+    otherwise returns every record mentioning "Mahdi". Prefixing each term
+    with ``+`` makes it required. Queries already using search syntax are
+    returned unchanged.
+    """
+    if _QUERY_SYNTAX.search(query):
+        return query
+    terms = [term.strip(",;") for term in query.split()]
+    return " ".join(f"+{term}" for term in terms if term)

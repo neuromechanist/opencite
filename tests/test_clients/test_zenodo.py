@@ -7,7 +7,7 @@ import pytest
 import respx
 
 from opencite.clients.preprint_base import FulltextRoute
-from opencite.clients.zenodo import ZenodoClient
+from opencite.clients.zenodo import ZenodoClient, _require_all_terms
 from opencite.config import Config
 from opencite.models import IDSet, Paper
 
@@ -112,3 +112,36 @@ class TestZenodoNetwork:
             with respx.mock(assert_all_called=False) as mock:
                 assert await client.lookup_doi("10.5281/zenodo.not-a-number") is None
                 assert not mock.routes
+
+
+class TestRequireAllTerms:
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("Kalayeh, Mahdi", "+Kalayeh +Mahdi"),
+            ("deep learning EEG-based", "+deep +learning +EEG-based"),
+            ("single", "+single"),
+        ],
+    )
+    def test_plain_queries_require_every_term(self, query: str, expected: str):
+        assert _require_all_terms(query) == expected
+
+    @pytest.mark.parametrize(
+        "query",
+        ['"exact phrase" x', "title:foo", "a OR b", "-x y", "10.5281/zenodo.1"],
+    )
+    def test_search_syntax_passes_through(self, query: str):
+        assert _require_all_terms(query) == query
+
+
+@pytest.mark.integration
+class TestZenodoSearchLive:
+    async def test_author_query_does_not_match_single_terms(self):
+        async with ZenodoClient(Config()) as client:
+            papers = await client.search("Kalayeh, Mahdi", max_results=20)
+        # Before requiring all terms this returned unrelated "Mahdi" records.
+        for paper in papers:
+            text = " ".join(
+                [paper.title, paper.abstract or ""] + [a.name for a in paper.authors]
+            ).lower()
+            assert "kalayeh" in text

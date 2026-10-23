@@ -12,10 +12,13 @@ This client provides:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import json
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
@@ -27,6 +30,20 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.crossref.org"
 
+# CrossRef pool limits, from its x-rate-limit-limit and x-concurrency-limit
+# response headers (public 1 req/s and 1 in flight; polite 3 and 3), with
+# a 10% rate margin: (requests/sec, max in flight).
+_PUBLIC_POOL_LIMITS = (0.9, 1)
+_POLITE_POOL_LIMITS = (2.7, 3)
+
+
+@dataclass
+class _InflightQuery:
+    """A shared ``/works`` request and the number of callers awaiting it."""
+
+    future: asyncio.Future[list[dict[str, Any]]]
+    waiters: int = 0
+
 
 class CrossRefClient(BaseClient):
     """Client for the CrossRef REST API.
@@ -35,12 +52,25 @@ class CrossRefClient(BaseClient):
     for works not indexed by the existing five sources.
     """
 
+    # bioRxiv/medRxiv keyword search also goes through CrossRef, so every
+    # CrossRef caller in the process shares one budget.
+    shared_limiter_key: ClassVar[str | None] = "crossref"
+
+    # In-flight /works queries keyed by (event loop, params). bioRxiv and
+    # medRxiv issue the identical query, so the second caller awaits the
+    # first's request instead of spending another slot of the budget.
+    _inflight: ClassVar[dict[tuple[int, str], _InflightQuery]] = {}
+
     def __init__(self, config: Config):
+        rate, max_concurrent = (
+            _POLITE_POOL_LIMITS if config.contact_email else _PUBLIC_POOL_LIMITS
+        )
         super().__init__(
             config=config,
             base_url=BASE_URL,
-            rate_limit=config.crossref_rate_limit,
-            burst=10,
+            rate_limit=rate,
+            burst=1,
+            max_concurrent=max_concurrent,
         )
 
     def _default_headers(self) -> dict[str, str]:
@@ -75,15 +105,42 @@ class CrossRefClient(BaseClient):
         if filters:
             params["filter"] = ",".join(filters)
 
-        try:
-            resp = await self.get("/works", params=params)
-            data = resp.json()
-        except Exception as e:
-            logger.warning("CrossRef search failed: %s", e)
-            return []
-
-        items = data.get("message", {}).get("items", [])
+        items = await self.query_works(params)
         return [p for item in items if (p := _parse_work(item)) is not None]
+
+    async def query_works(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Run a raw ``/works`` query and return the item dicts.
+
+        Identical concurrent queries share one request. Raises `APIError` on
+        HTTP failure and `ValueError` on a non-JSON body.
+        """
+        key = (id(asyncio.get_running_loop()), json.dumps(params, sort_keys=True))
+        entry = CrossRefClient._inflight.get(key)
+        if entry is None:
+            future = asyncio.ensure_future(self._fetch_works(params))
+            # Every waiter may be gone by the time the request fails; retrieve
+            # the exception so asyncio doesn't log it as never retrieved.
+            future.add_done_callback(lambda f: None if f.cancelled() else f.exception())
+            entry = _InflightQuery(future)
+            CrossRefClient._inflight[key] = entry
+        entry.waiters += 1
+        try:
+            # Shield so one cancelled waiter doesn't cancel the request for
+            # the others still awaiting it.
+            return list(await asyncio.shield(entry.future))
+        finally:
+            entry.waiters -= 1
+            if entry.waiters == 0:
+                # Last waiter out: drop the entry and cancel a request nobody
+                # awaits, so it never outlives its callers' client session.
+                if CrossRefClient._inflight.get(key) is entry:
+                    del CrossRefClient._inflight[key]
+                if not entry.future.done():
+                    entry.future.cancel()
+
+    async def _fetch_works(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        resp = await self.get("/works", params=params)
+        return (resp.json().get("message") or {}).get("items") or []
 
     async def lookup_doi(self, doi: str) -> Paper | None:
         """Look up a single work by DOI."""

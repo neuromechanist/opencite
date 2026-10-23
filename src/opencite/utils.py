@@ -7,6 +7,15 @@ import unicodedata
 
 from opencite.models import Author, Paper
 
+# bioRxiv/medRxiv (openRxiv) DOI prefixes: 10.1101 for preprints posted
+# before openRxiv took over deposits, 10.64898 for newer ones.
+OPENRXIV_DOI_PREFIXES = ("10.1101/", "10.64898/")
+
+
+def is_openrxiv_doi(doi: str) -> bool:
+    """True when *doi* is a bioRxiv or medRxiv preprint DOI."""
+    return doi.strip().lower().startswith(OPENRXIV_DOI_PREFIXES)
+
 
 def normalize_title(title: str) -> set[str]:
     """Normalize a title to a set of significant words for fuzzy matching."""

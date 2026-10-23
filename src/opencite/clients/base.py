@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Self
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 import httpx
 
@@ -23,24 +27,33 @@ class RateLimiter:
     """Token bucket rate limiter for async operations.
 
     The token state (rate, tokens, refill clock) is plain floats and safe
-    to share across event loops. The serializing `asyncio.Lock`, however,
-    binds to whichever event loop first acquires it; when the limiter is
-    re-used from a different loop (e.g. successive pytest-asyncio test
-    functions), the lock is transparently recreated.
+    to share across event loops. The serializing `asyncio.Lock` and the
+    concurrency `asyncio.Semaphore`, however, bind to whichever event loop
+    first uses them; when the limiter is re-used from a different loop (e.g.
+    successive pytest-asyncio test functions) they are transparently
+    recreated. Limits therefore hold within one event loop, not across
+    threads running separate loops at the same time.
     """
 
-    def __init__(self, rate: float, burst: int = 1):
+    def __init__(self, rate: float, burst: int = 1, max_concurrent: int | None = None):
         """
         Args:
             rate: Requests per second allowed.
             burst: Maximum burst size.
+            max_concurrent: Maximum requests in flight at once, or None
+                for no cap. Some APIs (e.g. CrossRef) limit concurrency
+                separately from request rate.
         """
         self.rate = rate
         self.burst = burst
+        self.max_concurrent = max_concurrent
         self._tokens = float(burst)
         self._last_refill = time.monotonic()
         self._lock: asyncio.Lock | None = None
         self._lock_loop_id: int | None = None
+        self._semaphore: asyncio.Semaphore | None = None
+        self._semaphore_loop_id: int | None = None
+        self._resume_at = 0.0
 
     def _lock_for_loop(self) -> asyncio.Lock:
         loop_id = id(asyncio.get_running_loop())
@@ -49,9 +62,37 @@ class RateLimiter:
             self._lock_loop_id = loop_id
         return self._lock
 
+    def _semaphore_for_loop(self) -> asyncio.Semaphore | None:
+        if self.max_concurrent is None:
+            return None
+        loop_id = id(asyncio.get_running_loop())
+        if self._semaphore is None or self._semaphore_loop_id != loop_id:
+            self._semaphore = asyncio.Semaphore(self.max_concurrent)
+            self._semaphore_loop_id = loop_id
+        return self._semaphore
+
+    @contextlib.asynccontextmanager
+    async def slot(self) -> AsyncGenerator[None]:
+        """Hold a concurrency slot (if capped) and consume one token."""
+        semaphore = self._semaphore_for_loop()
+        if semaphore is None:
+            await self.acquire()
+            yield
+            return
+        async with semaphore:
+            await self.acquire()
+            yield
+
+    def pause(self, seconds: float) -> None:
+        """Hold every caller of this limiter for *seconds* (e.g. after a 429)."""
+        self._resume_at = max(self._resume_at, time.monotonic() + seconds)
+
     async def acquire(self) -> None:
         """Wait until a token is available, then consume one."""
         async with self._lock_for_loop():
+            # Loop: a later 429 may extend the pause while we sleep.
+            while (paused_for := self._resume_at - time.monotonic()) > 0:
+                await asyncio.sleep(paused_for)
             now = time.monotonic()
             elapsed = now - self._last_refill
             self._tokens = min(self.burst, self._tokens + elapsed * self.rate)
@@ -76,7 +117,9 @@ class BaseClient(ABC):
     instance in the process (e.g. Semantic Scholar's ~1 req/sec budget)
     set `shared_limiter_key` to a unique string. The first instance to
     initialize creates the limiter at the given rate; later instances
-    reuse it regardless of who created them. Subclasses without a key
+    reuse it regardless of who created them, so the first instance's
+    config (e.g. CrossRef's public versus polite pool) fixes the limits for
+    the process until `reset_shared_limiters()`. Subclasses without a key
     keep per-instance limiters, matching the previous behavior.
     """
 
@@ -94,22 +137,27 @@ class BaseClient(ABC):
         burst: int = 1,
         timeout: float | None = None,
         max_retries: int | None = None,
+        max_concurrent: int | None = None,
     ):
         self.config = config
         self.base_url = base_url
-        self.rate_limiter = self._resolve_rate_limiter(rate_limit, burst)
+        self.rate_limiter = self._resolve_rate_limiter(
+            rate_limit, burst, max_concurrent
+        )
         self.timeout = timeout or config.timeout
         self.max_retries = max_retries or config.max_retries
         self._client: httpx.AsyncClient | None = None
 
-    def _resolve_rate_limiter(self, rate_limit: float, burst: int) -> RateLimiter:
+    def _resolve_rate_limiter(
+        self, rate_limit: float, burst: int, max_concurrent: int | None
+    ) -> RateLimiter:
         key = self.shared_limiter_key
         if key is None:
-            return RateLimiter(rate_limit, burst)
+            return RateLimiter(rate_limit, burst, max_concurrent)
         with BaseClient._shared_limiters_lock:
             limiter = BaseClient._shared_limiters.get(key)
             if limiter is None:
-                limiter = RateLimiter(rate_limit, burst)
+                limiter = RateLimiter(rate_limit, burst, max_concurrent)
                 BaseClient._shared_limiters[key] = limiter
             return limiter
 
@@ -127,11 +175,22 @@ class BaseClient(ABC):
             # Upstream APIs move endpoints behind 3xx (CORE now 301s
             # /v3/search/works -> /v3/search/works/). Without this the redirect
             # surfaces as an APIError and the source silently returns nothing.
-            # httpx strips Authorization on cross-origin redirects, so this does
-            # not leak an API key to a third-party host.
+            # httpx strips Authorization on cross-origin redirects; the request
+            # hook drops the other credential header we send (x-api-key).
             follow_redirects=True,
+            event_hooks={"request": [self._strip_foreign_credentials]},
         )
         return self
+
+    async def _strip_foreign_credentials(self, request: httpx.Request) -> None:
+        """Remove custom API-key headers from requests to a foreign host.
+
+        A redirect to another origin re-sends the client's default headers;
+        httpx only strips `Authorization` itself.
+        """
+        if request.url.host != httpx.URL(self.base_url).host:
+            for header in _CREDENTIAL_HEADERS:
+                request.headers.pop(header, None)
 
     async def __aexit__(self, *args: Any) -> None:
         if self._client:
@@ -153,13 +212,14 @@ class BaseClient(ABC):
         if self._client is None:
             raise RuntimeError("Client not initialized. Use 'async with'.")
 
-        last_error: Exception | None = None
+        last_failure: str | None = None
         for attempt in range(self.max_retries):
-            await self.rate_limiter.acquire()
             try:
-                resp = await self._client.request(method, path, **kwargs)
+                async with self.rate_limiter.slot():
+                    resp = await self._client.request(method, path, **kwargs)
                 if resp.status_code == 429:
-                    retry_after = int(resp.headers.get("Retry-After", "5"))
+                    last_failure = "HTTP 429 Too Many Requests"
+                    retry_after = _retry_after_seconds(resp)
                     logger.warning(
                         "Rate limited by %s, waiting %ds (attempt %d/%d)",
                         self.base_url,
@@ -167,12 +227,14 @@ class BaseClient(ABC):
                         attempt + 1,
                         self.max_retries,
                     )
-                    await asyncio.sleep(retry_after)
+                    # Pause the limiter, not just this caller, so clients
+                    # sharing the budget back off too.
+                    self.rate_limiter.pause(retry_after)
                     continue
                 resp.raise_for_status()
                 return resp
             except httpx.HTTPStatusError as e:
-                last_error = e
+                last_failure = _describe(e)
                 if e.response.status_code >= 500:
                     wait = 2**attempt
                     logger.warning(
@@ -183,21 +245,25 @@ class BaseClient(ABC):
                     )
                     await asyncio.sleep(wait)
                     continue
-                raise APIError.from_http_error(e, e.response.status_code) from e
+                # `from None`: the chained HTTPStatusError would print the
+                # unredacted URL (and any API key) in tracebacks.
+                raise APIError.from_http_error(
+                    e, e.response.status_code, _describe(e)
+                ) from None
             except httpx.RequestError as e:
-                last_error = e
+                last_failure = _describe(e)
                 wait = 2**attempt
                 logger.warning(
                     "Request error from %s: %s, retry in %ds",
                     self.base_url,
-                    e,
+                    _describe(e),
                     wait,
                 )
                 await asyncio.sleep(wait)
 
         raise APIError(
             f"Failed after {self.max_retries} retries to {self.base_url}",
-            details=str(last_error) if last_error else None,
+            details=last_failure,
         )
 
     async def get(self, path: str, **kwargs: Any) -> httpx.Response:
@@ -205,3 +271,54 @@ class BaseClient(ABC):
 
     async def post(self, path: str, **kwargs: Any) -> httpx.Response:
         return await self._request("POST", path, **kwargs)
+
+
+# Credential headers other than Authorization, which httpx already strips on
+# cross-origin redirects.
+_CREDENTIAL_HEADERS = ("x-api-key",)
+
+# Query parameters that carry credentials or contact details; their values
+# are masked before a URL is put in an error message or log line.
+_SENSITIVE_PARAMS = frozenset(
+    {"api_key", "apikey", "key", "token", "access_token", "email", "mailto"}
+)
+
+
+def _redact_url(url: httpx.URL) -> str:
+    params = [
+        (name, "***" if name.lower() in _SENSITIVE_PARAMS else value)
+        for name, value in url.params.multi_items()
+    ]
+    return str(url.copy_with(params=params)) if params else str(url)
+
+
+def _describe(exc: Exception) -> str:
+    """Render an exception for errors and logs without leaking credentials.
+
+    HTTP status errors embed the request URL, which can hold an API key as a
+    query parameter, so they are rebuilt from the status and a redacted URL.
+    httpx timeouts often have an empty message, so fall back to the type name.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        resp = exc.response
+        return (
+            f"{resp.status_code} {resp.reason_phrase} for url "
+            f"'{_redact_url(exc.request.url)}'"
+        )
+    return str(exc) or type(exc).__name__
+
+
+_MAX_RETRY_AFTER = 60
+
+
+def _retry_after_seconds(resp: httpx.Response, default: int = 5) -> int:
+    """Parse a numeric Retry-After header, capped at 60 s.
+
+    Falls back to *default* for an HTTP-date or junk value. The cap matters
+    because the wait pauses every client sharing the limiter.
+    """
+    try:
+        seconds = int(resp.headers.get("Retry-After", default))
+    except ValueError:
+        seconds = default
+    return min(max(0, seconds), _MAX_RETRY_AFTER)

@@ -103,6 +103,12 @@ class TestArXivClientParsing:
         papers = client._parse_feed("not xml at all <<<<<")
         assert papers == []
 
+    def test_parse_invalid_xml_strict_raises(self):
+        from opencite.exceptions import APIError
+
+        with pytest.raises(APIError, match="malformed Atom XML"):
+            self._client()._parse_feed("not xml at all <<<<<", strict=True)
+
     def test_parse_feed_year_filter(self):
         client = self._client()
         # Paper is from 2017; filtering for year >= 2020 should exclude it

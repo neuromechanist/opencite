@@ -309,16 +309,22 @@ async def _cmd_search(args: argparse.Namespace, config: object) -> int:
     formatter = get_formatter(args.format)
     output = formatter.format_papers(result.papers, verbose=args.verbose)
 
-    if not args.quiet and args.format == "text":
+    # The summary goes to stderr, so it is safe for every output format.
+    if not args.quiet:
         dedup_msg = ""
         if result.deduplicated_count > 0:
             dedup_msg = f" ({result.deduplicated_count} duplicates removed)"
-        source_info = ", ".join(
-            f"{k}: {v}" for k, v in sorted(result.total_by_source.items())
-        )
+        status = {k: str(v) for k, v in result.total_by_source.items()}
+        status.update(dict.fromkeys(result.failed_sources, "failed"))
+        status.update(dict.fromkeys(result.skipped_sources, "skipped"))
+        source_info = ", ".join(f"{k}: {v}" for k, v in sorted(status.items()))
         print(f"Sources: {source_info}{dedup_msg}", file=sys.stderr)
 
     _write_output(output, args.output)
+    # Exit non-zero when nothing could be searched, so scripts can tell an
+    # outage from a query with no matches.
+    if not result.total_by_source and (result.failed_sources or result.skipped_sources):
+        return 1
     return 0
 
 

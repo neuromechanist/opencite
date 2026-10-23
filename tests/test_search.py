@@ -284,3 +284,39 @@ class TestSearchCancellation:
         assert len(started) == 2
         assert all(t.done() for t in started)
         assert all(t.cancelled() for t in started)
+
+
+class TestSourceStatusReporting:
+    """Failed and skipped sources are reported, never shown as zero results."""
+
+    @pytest.mark.asyncio
+    async def test_keyless_core_left_out_of_default_search(self):
+        others = [s for s in ALL_SOURCES if s != "core"]
+        config = Config(core_api_key="", disabled_sources=others)
+        async with SearchOrchestrator(config) as orch:
+            result = await orch.search("memory")
+        assert "core" not in result.total_by_source
+        assert result.skipped_sources == {}
+        assert result.failed_sources == {}
+
+    @pytest.mark.asyncio
+    async def test_keyless_core_reported_skipped_when_requested(self):
+        async with SearchOrchestrator(Config(core_api_key="")) as orch:
+            result = await orch.search("memory", sources=["core"])
+        assert result.skipped_sources == {"core": "CORE_API_KEY not set"}
+        assert "core" not in result.total_by_source
+
+    @pytest.mark.asyncio
+    async def test_failing_source_reported_failed(self):
+        import httpx
+        import respx
+
+        with respx.mock:
+            respx.get("https://zenodo.org/api/records").mock(
+                return_value=httpx.Response(400, json={"message": "bad query"})
+            )
+            async with SearchOrchestrator(Config()) as orch:
+                result = await orch.search("memory", sources=["zenodo"])
+        assert "zenodo" in result.failed_sources
+        assert "HTTP 400" in result.failed_sources["zenodo"]
+        assert "zenodo" not in result.total_by_source

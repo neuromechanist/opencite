@@ -35,11 +35,14 @@ _ARXIV_DOI_PREFIX = "10.48550/arxiv."
 class ArXivClient(PreprintClient):
     """Client for the arXiv Atom v1 search API.
 
-    Requires no API key. arXiv's terms of service ask for polite
-    crawling (<= 1 req/3 sec for bulk; 3/sec is the hard cap).
+    Requires no API key. The arXiv API User's Manual asks for no more
+    than one request every three seconds over a single connection, so all
+    instances in the process share one limiter capped at one request in
+    flight; exceeding it gets HTTP 429 and connection stalls.
     """
 
     name: ClassVar[str] = "arxiv"
+    shared_limiter_key: ClassVar[str | None] = "arxiv"
 
     def __init__(self, config: Config) -> None:
         super().__init__(
@@ -47,6 +50,7 @@ class ArXivClient(PreprintClient):
             base_url=BASE_URL,
             rate_limit=config.arxiv_rate_limit,
             burst=1,
+            max_concurrent=1,
         )
 
     def _default_headers(self) -> dict[str, str]:
@@ -79,12 +83,10 @@ class ArXivClient(PreprintClient):
             "sortOrder": "descending",
         }
 
-        try:
-            resp = await self.get("/query", params=params)
-        except APIError as e:
-            logger.warning("arXiv search failed for query %r: %s", query, e.message)
-            return []
-        return self._parse_feed(resp.text, year_from=year_from, year_to=year_to)
+        resp = await self.get("/query", params=params)
+        return self._parse_feed(
+            resp.text, year_from=year_from, year_to=year_to, strict=True
+        )
 
     async def lookup_arxiv_id(self, arxiv_id: str) -> Paper | None:
         """Look up a single paper by arXiv ID (e.g. ``2106.15928`` or ``cs.LG/0101001``)."""
@@ -170,11 +172,18 @@ class ArXivClient(PreprintClient):
         xml_text: str,
         year_from: int | None = None,
         year_to: int | None = None,
+        *,
+        strict: bool = False,
     ) -> list[Paper]:
-        """Parse an Atom feed response into a list of Papers."""
+        """Parse an Atom feed into Papers.
+
+        Malformed XML yields ``[]``, or raises `APIError` when *strict*.
+        """
         try:
             root = ET.fromstring(xml_text)
         except ET.ParseError as exc:
+            if strict:
+                raise APIError(f"arXiv returned malformed Atom XML: {exc}") from exc
             logger.warning(
                 "arXiv: failed to parse Atom XML (%s). Preview: %.100r",
                 exc,

@@ -15,6 +15,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from opencite.clients.base import BaseClient
+from opencite.exceptions import APIKeyError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
 
 if TYPE_CHECKING:
@@ -48,33 +49,28 @@ class COREClient(BaseClient):
         return headers
 
     @property
-    def _enabled(self) -> bool:
+    def enabled(self) -> bool:
+        """CORE rejects keyless requests, so the client needs an API key."""
         return bool(self.config.core_api_key)
 
     async def search(self, query: str, max_results: int = 20) -> list[Paper]:
         """Search CORE for open access papers."""
-        if not self._enabled:
-            logger.debug("CORE API key not set; skipping search")
-            return []
+        if not self.enabled:
+            raise APIKeyError("CORE search requires CORE_API_KEY")
 
         params: dict[str, Any] = {
             "q": query,
             "limit": min(max_results, 100),
         }
 
-        try:
-            resp = await self.get("/v3/search/works/", params=params)
-            data = resp.json()
-        except Exception as e:
-            logger.warning("CORE search failed: %s", e)
-            return []
-
+        resp = await self.get("/v3/search/works/", params=params)
+        data = resp.json()
         results = data.get("results", [])
         return [p for item in results if (p := _parse_work(item)) is not None]
 
     async def lookup_doi(self, doi: str) -> Paper | None:
         """Look up a paper by DOI in CORE."""
-        if not self._enabled:
+        if not self.enabled:
             return None
 
         try:

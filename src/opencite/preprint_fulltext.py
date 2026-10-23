@@ -22,7 +22,7 @@ from opencite.clients.medrxiv import MedRxivClient
 from opencite.clients.osf import OSFClient
 from opencite.clients.preprint_base import FulltextRoute, PreprintClient
 from opencite.clients.zenodo import ZenodoClient
-from opencite.utils import make_paper_filename
+from opencite.utils import is_openrxiv_doi, make_paper_filename
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -38,7 +38,8 @@ class PreprintFullTextRetriever:
 
     1. ``paper.data_sources`` matches a client's ``name`` (e.g. ``"arxiv"``).
     2. ``paper.doi`` prefix matches a known preprint DOI prefix
-       (``10.48550/arXiv.`` -> arxiv; ``10.1101/`` -> biorxiv then medrxiv).
+       (``10.48550/arXiv.`` -> arxiv; ``10.1101/`` or ``10.64898/`` -> biorxiv
+       then medrxiv).
 
     Mirrors the shape of :class:`opencite.fulltext.FullTextRetriever` so
     callers in `pdf.py` and `batch.py` can chain them with parallel structure.
@@ -129,7 +130,7 @@ class PreprintFullTextRetriever:
             return self._by_name.get("zenodo")
         if doi.startswith("10.6084/m9.figshare."):
             return self._by_name.get("figshare")
-        if doi.startswith("10.1101/"):
+        if is_openrxiv_doi(doi):
             # bioRxiv first; medRxiv as fallback. Both will return None for
             # the wrong server, so the orchestrator above us would have to
             # try multiple. Here we pick ONE client to fetch full text from

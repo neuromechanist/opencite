@@ -21,14 +21,14 @@ BASE_URL = "https://test-api.example.com"
 class _TestClient(BaseClient):
     """Concrete BaseClient subclass for testing."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, max_retries: int = 3):
         super().__init__(
             config=config,
             base_url=BASE_URL,
             rate_limit=1000.0,
             burst=100,
             timeout=5.0,
-            max_retries=3,
+            max_retries=max_retries,
         )
 
     def _default_headers(self) -> dict[str, str]:
@@ -62,6 +62,33 @@ class TestRetryOn429:
         async with _TestClient(test_config) as client:
             with pytest.raises(APIError, match="Failed after 3 retries"):
                 await client.get("/data")
+
+    @respx.mock
+    async def test_429_with_http_date_retry_after_uses_default(
+        self, test_config: Config
+    ):
+        route = respx.get(f"{BASE_URL}/data").mock(
+            side_effect=[
+                httpx.Response(
+                    429, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}
+                ),
+                httpx.Response(200, json={"ok": True}),
+            ]
+        )
+        async with _TestClient(test_config) as client:
+            resp = await client.get("/data")
+        assert resp.status_code == 200
+        assert route.call_count == 2
+
+    @respx.mock
+    async def test_429_exhaustion_reports_cause(self, test_config: Config):
+        respx.get(f"{BASE_URL}/data").mock(
+            return_value=httpx.Response(429, headers={"Retry-After": "0"})
+        )
+        async with _TestClient(test_config) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data")
+        assert excinfo.value.details == "HTTP 429 Too Many Requests"
 
 
 class TestRetryOn500:
@@ -150,6 +177,14 @@ class TestNetworkErrors:
             with pytest.raises(APIError, match="Failed after 3 retries"):
                 await client.get("/data")
 
+    @respx.mock
+    async def test_empty_timeout_message_names_exception(self, test_config: Config):
+        respx.get(f"{BASE_URL}/data").mock(side_effect=httpx.ReadTimeout(""))
+        async with _TestClient(test_config, max_retries=1) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data")
+        assert excinfo.value.details == "ReadTimeout"
+
 
 class TestClientNotInitialized:
     async def test_request_without_context_manager(self, test_config: Config):
@@ -168,3 +203,76 @@ class TestPostMethod:
             resp = await client.post("/submit", json={"key": "value"})
         assert resp.status_code == 200
         assert route.call_count == 1
+
+
+class TestCredentialRedaction:
+    @respx.mock
+    async def test_api_key_not_in_http_error(self, test_config: Config):
+        respx.get(f"{BASE_URL}/data").mock(return_value=httpx.Response(400))
+        async with _TestClient(test_config) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data", params={"api_key": "s3cret", "q": "x"})
+        text = str(excinfo.value)
+        assert "s3cret" not in text
+        assert "api_key=%2A%2A%2A" in text or "api_key=***" in text
+        assert "q=x" in text
+
+    @respx.mock
+    async def test_api_key_not_in_exhausted_5xx_details(self, test_config: Config):
+        respx.get(f"{BASE_URL}/data").mock(return_value=httpx.Response(503))
+        async with _TestClient(test_config, max_retries=1) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data", params={"api_key": "s3cret"})
+        assert "s3cret" not in str(excinfo.value)
+
+
+class _KeyedClient(_TestClient):
+    def _default_headers(self) -> dict[str, str]:
+        return {"x-api-key": "s3cret"}
+
+
+class TestRedirectCredentials:
+    @respx.mock
+    async def test_x_api_key_kept_on_same_host_redirect(self, test_config: Config):
+        respx.get(f"{BASE_URL}/old").mock(
+            return_value=httpx.Response(301, headers={"Location": f"{BASE_URL}/new"})
+        )
+        route = respx.get(f"{BASE_URL}/new").mock(return_value=httpx.Response(200))
+        async with _KeyedClient(test_config) as client:
+            await client.get("/old")
+        assert route.calls.last.request.headers["x-api-key"] == "s3cret"
+
+    @respx.mock
+    async def test_x_api_key_dropped_on_cross_host_redirect(self, test_config: Config):
+        elsewhere = "https://other.example.org"
+        respx.get(f"{BASE_URL}/old").mock(
+            return_value=httpx.Response(301, headers={"Location": f"{elsewhere}/new"})
+        )
+        route = respx.get(f"{elsewhere}/new").mock(return_value=httpx.Response(200))
+        async with _KeyedClient(test_config) as client:
+            await client.get("/old")
+        assert "x-api-key" not in route.calls.last.request.headers
+
+
+class TestRedactedChaining:
+    @respx.mock
+    async def test_traceback_chain_carries_no_api_key(self, test_config: Config):
+        import traceback
+
+        # Built at runtime so the traceback's own source lines can't show it.
+        secret = "".join(["s3", "cr", "et"])
+        respx.get(f"{BASE_URL}/data").mock(return_value=httpx.Response(400))
+        async with _TestClient(test_config) as client:
+            with pytest.raises(APIError) as excinfo:
+                await client.get("/data", params={"api_key": secret})
+        rendered = "".join(traceback.format_exception(excinfo.value))
+        assert secret not in rendered
+        assert excinfo.value.cause is None
+
+
+class TestRetryAfterCap:
+    def test_retry_after_is_capped(self):
+        from opencite.clients.base import _retry_after_seconds
+
+        resp = httpx.Response(429, headers={"Retry-After": "3600"})
+        assert _retry_after_seconds(resp) == 60

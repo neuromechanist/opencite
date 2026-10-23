@@ -108,3 +108,20 @@ class TestFigshareNetwork:
             with respx.mock(assert_all_called=False) as mock:
                 assert await client.lookup_doi("10.1038/nature12373") is None
                 assert not mock.routes
+
+
+class TestFigshareSearchFailures:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_all_article_fetches_failing_raises(self):
+        from opencite.exceptions import APIError
+
+        respx.post(f"{_BASE}/v2/articles/search").mock(
+            return_value=httpx.Response(200, json=[{"id": 1}, {"id": 2}])
+        )
+        respx.get(url__regex=rf"{_BASE}/v2/articles/\d+").mock(
+            return_value=httpx.Response(404)
+        )
+        async with FigshareClient(Config()) as client:
+            with pytest.raises(APIError, match="failed for all 2 results"):
+                await client.search("memory")

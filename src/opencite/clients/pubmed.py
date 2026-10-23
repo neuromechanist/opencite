@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from opencite.clients.base import BaseClient
+from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, Source
 
 if TYPE_CHECKING:
@@ -72,11 +73,19 @@ class PubMedClient(BaseClient):
         if not id_list:
             return []
 
-        return await self.fetch_by_pmids(id_list)
+        return await self.fetch_by_pmids(id_list, raise_if_all_fail=True)
 
-    async def fetch_by_pmids(self, pmids: list[str]) -> list[Paper]:
-        """Fetch full paper metadata for a list of PMIDs via efetch."""
+    async def fetch_by_pmids(
+        self, pmids: list[str], *, raise_if_all_fail: bool = False
+    ) -> list[Paper]:
+        """Fetch full paper metadata for a list of PMIDs via efetch.
+
+        A failed chunk is logged and skipped. With ``raise_if_all_fail``,
+        an `APIError` is raised when every chunk fails, so a search outage
+        is not reported as zero results.
+        """
         papers: list[Paper] = []
+        failures: list[str] = []
         # Process in chunks of 200 (PubMed recommendation)
         for i in range(0, len(pmids), 200):
             chunk = pmids[i : i + 200]
@@ -88,10 +97,13 @@ class PubMedClient(BaseClient):
             }
             try:
                 resp = await self.get("/efetch.fcgi", params=fetch_params)
-                chunk_papers = _parse_pubmed_xml(resp.text)
-                papers.extend(chunk_papers)
-            except Exception:
-                logger.warning("PubMed efetch failed for chunk at %d", i)
+                papers.extend(_parse_pubmed_xml(resp.text, strict=raise_if_all_fail))
+            except Exception as e:
+                failures.append(str(e) or type(e).__name__)
+                logger.warning("PubMed efetch failed for chunk at %d: %s", i, e)
+        chunk_count = len(range(0, len(pmids), 200))
+        if raise_if_all_fail and chunk_count and len(failures) == chunk_count:
+            raise APIError(f"PubMed efetch failed for every chunk: {failures[-1]}")
         return papers
 
     async def lookup_pmid(self, pmid: str) -> Paper | None:
@@ -181,12 +193,17 @@ def _extract_link_ids(data: dict) -> list[str]:
     return ids
 
 
-def _parse_pubmed_xml(xml_text: str) -> list[Paper]:
-    """Parse PubMed efetch XML into Paper models."""
+def _parse_pubmed_xml(xml_text: str, *, strict: bool = False) -> list[Paper]:
+    """Parse PubMed efetch XML into Paper models.
+
+    Malformed XML yields ``[]``, or raises `APIError` when *strict*.
+    """
     papers: list[Paper] = []
     try:
         root = ET.fromstring(xml_text)
-    except ET.ParseError:
+    except ET.ParseError as e:
+        if strict:
+            raise APIError(f"PubMed returned malformed XML: {e}") from e
         logger.warning("Failed to parse PubMed XML response")
         return []
 

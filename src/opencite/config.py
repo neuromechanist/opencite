@@ -185,9 +185,8 @@ class Config:
     openalex_rate_limit: float = 100.0
     s2_rate_limit: float = 1.0
     pubmed_rate_limit: float = 10.0
-    arxiv_rate_limit: float = 3.0
+    arxiv_rate_limit: float = 1 / 3  # arXiv API policy: one request per 3 s
     biorxiv_rate_limit: float = 10.0
-    crossref_rate_limit: float = 50.0
     core_rate_limit: float = 0.5
     unpaywall_rate_limit: float = 10.0
     osf_rate_limit: float = 5.0

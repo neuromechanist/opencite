@@ -221,6 +221,11 @@ class SearchResult:
     papers: list[Paper]
     total_by_source: dict[str, int] = field(default_factory=dict)
     deduplicated_count: int = 0
+    # Sources whose search raised, mapped to the reason. They are absent
+    # from total_by_source so "failed" is never confused with "no matches".
+    failed_sources: dict[str, str] = field(default_factory=dict)
+    # Requested sources that were not queried (e.g. missing API key).
+    skipped_sources: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

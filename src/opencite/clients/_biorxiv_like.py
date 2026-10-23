@@ -1,8 +1,9 @@
 """Shared base for bioRxiv-style preprint clients (bioRxiv + medRxiv).
 
-bioRxiv and medRxiv share the same DOI prefix (10.1101), the same CrossRef
-keyword-search path, and the same Content API (`api.biorxiv.org`) URL shape.
-The only differences are:
+bioRxiv and medRxiv share the same DOI prefixes (10.1101, and 10.64898
+for newer openRxiv preprints), the same CrossRef keyword-search path, and
+the same Content API (`api.biorxiv.org`) URL shape. The only differences
+are:
 
 - the `server` segment in Content API URLs (`/details/{server}/{doi}`)
 - the public site domain used for landing-page and PDF URLs
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import httpx
 
+from opencite.clients.crossref import CrossRefClient
 from opencite.clients.preprint_base import (
     FulltextRoute,
     PreprintClient,
@@ -28,6 +30,7 @@ from opencite.clients.preprint_base import (
 )
 from opencite.exceptions import APIError
 from opencite.models import Author, IDSet, Paper, PDFLocation, Source
+from opencite.utils import is_openrxiv_doi
 
 if TYPE_CHECKING:
     from opencite.config import Config
@@ -35,10 +38,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _BIORXIV_BASE = "https://api.biorxiv.org"
-_CROSSREF_BASE = "https://api.crossref.org"
 
 # CrossRef "type" for preprints
 _PREPRINT_TYPE = "posted-content"
+
+# CrossRef's `prefix` filter matches the depositing member's owner prefix,
+# not the DOI string. bioRxiv/medRxiv DOIs keep the 10.1101 prefix, but
+# their records are now deposited by openRxiv under owner prefix 10.64898;
+# repeating a filter name ORs the values.
+_CROSSREF_FILTER = f"prefix:10.1101,prefix:10.64898,type:{_PREPRINT_TYPE}"
 
 
 class _BiorxivLikePreprintClient(PreprintClient):
@@ -64,16 +72,14 @@ class _BiorxivLikePreprintClient(PreprintClient):
             rate_limit=config.biorxiv_rate_limit,
             burst=5,
         )
-        self._crossref_client: httpx.AsyncClient | None = None
+        # Keyword search goes through CrossRef; using CrossRefClient shares
+        # its process-wide rate/concurrency budget and 429 retry handling.
+        self._crossref = CrossRefClient(config)
 
     async def __aenter__(self) -> _BiorxivLikePreprintClient:
         await super().__aenter__()
         try:
-            self._crossref_client = httpx.AsyncClient(
-                base_url=_CROSSREF_BASE,
-                timeout=self.timeout,
-                headers=self._default_headers(),
-            )
+            await self._crossref.__aenter__()
         except Exception:
             # The parent's session was opened above; close it before
             # propagating so we don't leak the underlying httpx client.
@@ -82,15 +88,12 @@ class _BiorxivLikePreprintClient(PreprintClient):
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        if self._crossref_client:
-            await self._crossref_client.aclose()
-            self._crossref_client = None
+        await self._crossref.__aexit__(*args)
         await super().__aexit__(*args)
 
     def _default_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
         if self.config.contact_email:
-            # CrossRef polite-pool header
             headers["User-Agent"] = f"opencite/0.1 (mailto:{self.config.contact_email})"
         return headers
 
@@ -107,54 +110,14 @@ class _BiorxivLikePreprintClient(PreprintClient):
         """Search this server's preprints via CrossRef.
 
         CrossRef returns both bioRxiv and medRxiv records under the shared
-        ``prefix:10.1101`` filter, so each subclass post-filters to its own
+        openRxiv prefix filter, so each subclass post-filters to its own
         ``server`` to keep attribution clean.
+
+        Raises `APIError` when CrossRef fails so the orchestrator can report
+        the source as failed rather than empty.
         """
-        if self._crossref_client is None:
-            raise RuntimeError("Client not initialized. Use 'async with'.")
-
-        params: dict[str, Any] = {
-            "query.bibliographic": query,
-            "filter": f"prefix:10.1101,type:{_PREPRINT_TYPE}",
-            # Ask CrossRef for more rows than requested because we will
-            # post-filter on container-title.
-            "rows": min(max_results * 2, 100),
-            "select": (
-                "DOI,title,author,published,created,abstract,"
-                "container-title,URL,is-referenced-by-count"
-            ),
-        }
-        if self.config.contact_email:
-            params["mailto"] = self.config.contact_email
-
-        data: dict = {}
-        await self.rate_limiter.acquire()
-        try:
-            resp = await self._crossref_client.get("/works", params=params)
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as e:
-            logger.warning(
-                "CrossRef search HTTP %d for query %r",
-                e.response.status_code,
-                query,
-            )
-            return []
-        except httpx.TimeoutException:
-            logger.warning("CrossRef search timed out for query %r", query)
-            return []
-        except httpx.RequestError as e:
-            logger.warning("CrossRef search network error for query %r: %s", query, e)
-            return []
-        except ValueError as e:
-            # json.JSONDecodeError is a subclass of ValueError
-            logger.warning(
-                "CrossRef search returned non-JSON for query %r: %s", query, e
-            )
-            return []
-
         papers: list[Paper] = []
-        for item in (data.get("message") or {}).get("items") or []:
+        for item in await self._crossref.query_works(_crossref_search_params(query)):
             paper = self._parse_crossref_item(item)
             if paper:
                 papers.append(paper)
@@ -203,9 +166,9 @@ class _BiorxivLikePreprintClient(PreprintClient):
     # ------------------------------------------------------------------
 
     def fulltext_route(self, paper: Paper) -> FulltextRoute:
-        """`.full` HTML when a 10.1101/* DOI is present, else NONE."""
+        """`.full` HTML when an openRxiv DOI is present, else NONE."""
         doi = (paper.doi or "").strip()
-        return FulltextRoute.HTML if doi.startswith("10.1101/") else FulltextRoute.NONE
+        return FulltextRoute.HTML if is_openrxiv_doi(doi) else FulltextRoute.NONE
 
     async def fetch_fulltext(self, paper: Paper) -> str | None:
         """Fetch the bioRxiv/medRxiv `.full` HTML and return markdown.
@@ -216,7 +179,7 @@ class _BiorxivLikePreprintClient(PreprintClient):
         response, or markdown conversion failure.
         """
         doi = (paper.doi or "").strip()
-        if not doi.startswith("10.1101/"):
+        if not is_openrxiv_doi(doi):
             return None
 
         if self._client is None:
@@ -317,8 +280,8 @@ class _BiorxivLikePreprintClient(PreprintClient):
     def _parse_crossref_item(self, item: dict) -> Paper | None:
         """Parse a CrossRef works item into a Paper, filtered to this server.
 
-        Returns None when the item's container-title doesn't match this
-        client's server, so each client only emits papers it owns.
+        Returns None when the item belongs to the other server, so each
+        client only emits papers it owns.
         """
         doi = (item.get("DOI") or "").strip()
         titles = item.get("title") or []
@@ -326,13 +289,7 @@ class _BiorxivLikePreprintClient(PreprintClient):
         if not title:
             return None
 
-        # Determine server from container-title and filter to this client's
-        # server. CrossRef's container-title field reliably distinguishes
-        # bioRxiv from medRxiv even though they share the 10.1101 DOI prefix.
-        container = item.get("container-title") or []
-        container_name = container[0].lower() if container else ""
-        # Default to biorxiv for empty/unknown container-titles.
-        item_server = "medrxiv" if "medrxiv" in container_name else "biorxiv"
+        item_server = _crossref_item_server(item)
         if item_server != self.server:
             return None
 
@@ -398,3 +355,37 @@ class _BiorxivLikePreprintClient(PreprintClient):
             citation_count=citation_count,
             data_sources={item_server},
         )
+
+
+def _crossref_search_params(query: str) -> dict[str, Any]:
+    """CrossRef ``/works`` params for an openRxiv keyword search.
+
+    The params do not depend on the server, so bioRxiv and medRxiv searches
+    for the same query coalesce into one CrossRef request.
+    """
+    return {
+        "query.bibliographic": query,
+        "filter": _CROSSREF_FILTER,
+        # bioRxiv and medRxiv hits come back interleaved and each client
+        # keeps only its own server's, so fetch a full page.
+        "rows": 100,
+        "select": (
+            "DOI,title,author,published,created,abstract,"
+            "container-title,resource,URL,is-referenced-by-count"
+        ),
+    }
+
+
+def _crossref_item_server(item: dict) -> str:
+    """Return ``"medrxiv"`` or ``"biorxiv"`` for an openRxiv CrossRef item.
+
+    openRxiv deposits omit ``container-title``; the primary resource URL
+    (``http://medrxiv.org/lookup/doi/...``) still identifies the server.
+    Older deposits carry the server as container-title. (The ``institution``
+    field also names the server but cannot be requested via ``select``.)
+    Unknown items default to bioRxiv.
+    """
+    primary_url = ((item.get("resource") or {}).get("primary") or {}).get("URL") or ""
+    container = item.get("container-title") or []
+    signals = " ".join([primary_url, *container]).lower()
+    return "medrxiv" if "medrxiv" in signals else "biorxiv"

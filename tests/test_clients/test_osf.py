@@ -6,12 +6,71 @@ import httpx
 import pytest
 import respx
 
-from opencite.clients.osf import OSFClient
+from opencite.clients.osf import (
+    OSFClient,
+    _rank_by_share_order,
+    _share_result_ids,
+    _share_search_params,
+)
 from opencite.clients.preprint_base import FulltextRoute
 from opencite.config import Config
+from opencite.exceptions import APIError
 from opencite.models import IDSet, Paper
 
 _BASE = "https://api.osf.io"
+
+# Trimmed from a real SHARE index-card-search response for
+# "working memory training" (resourceType=Preprint, accessService=osf.io).
+_SHARE_PAYLOAD = {
+    "data": {
+        "type": "index-card-search",
+        "relationships": {
+            "searchResultPage": {
+                "data": [
+                    {"id": "1792737315630356280-0", "type": "search-result"},
+                    {"id": "1792737315630356280-1", "type": "search-result"},
+                ]
+            }
+        },
+    },
+    "included": [
+        # Ranked second, listed first: order must come from searchResultPage.
+        {
+            "id": "b918a31c-c751-42ef-95bc-b061aa08f319",
+            "type": "index-card",
+            "attributes": {"resourceMetadata": {"@id": "https://osf.io/9fe8n"}},
+        },
+        {
+            "id": "1792737315630356280-1",
+            "type": "search-result",
+            "relationships": {
+                "indexCard": {
+                    "data": {
+                        "id": "b918a31c-c751-42ef-95bc-b061aa08f319",
+                        "type": "index-card",
+                    }
+                }
+            },
+        },
+        {
+            "id": "1792737315630356280-0",
+            "type": "search-result",
+            "relationships": {
+                "indexCard": {
+                    "data": {
+                        "id": "653c4e54-d1a0-43f9-b5e0-11faa00c25f4",
+                        "type": "index-card",
+                    }
+                }
+            },
+        },
+        {
+            "id": "653c4e54-d1a0-43f9-b5e0-11faa00c25f4",
+            "type": "index-card",
+            "attributes": {"resourceMetadata": {"@id": "https://osf.io/g6dhv"}},
+        },
+    ],
+}
 
 # Realistic shape based on the public OSF API: ``attributes.doi`` is None
 # for many published preprints and the canonical DOI lives in
@@ -102,34 +161,121 @@ class TestOSFParse:
         assert client.fulltext_route(paper) == FulltextRoute.NONE
 
 
+def _single_result_payload(resource_url: str) -> dict:
+    return {
+        "data": {
+            "relationships": {
+                "searchResultPage": {"data": [{"id": "r0", "type": "search-result"}]}
+            }
+        },
+        "included": [
+            {
+                "id": "r0",
+                "type": "search-result",
+                "relationships": {
+                    "indexCard": {"data": {"id": "c0", "type": "index-card"}}
+                },
+            },
+            {
+                "id": "c0",
+                "type": "index-card",
+                "attributes": {"resourceMetadata": {"@id": resource_url}},
+            },
+        ],
+    }
+
+
+class TestShareResultIds:
+    def test_extracts_ids_in_rank_order(self):
+        assert _share_result_ids(_SHARE_PAYLOAD) == ["g6dhv", "9fe8n"]
+
+    def test_empty_payload(self):
+        assert _share_result_ids({"data": {}, "included": []}) == []
+
+    def test_accepts_http_and_trailing_slash(self):
+        payload = _single_result_payload("http://osf.io/abc12/")
+        assert _share_result_ids(payload) == ["abc12"]
+
+    def test_unparseable_page_raises(self):
+        payload = _single_result_payload("https://osf.io/preprints/psyarxiv/abc12")
+        with pytest.raises(APIError, match="no OSF IDs"):
+            _share_result_ids(payload)
+
+    def test_page_of_only_non_osf_resources_raises(self):
+        payload = {
+            "data": {
+                "relationships": {
+                    "searchResultPage": {
+                        "data": [{"id": "r0", "type": "search-result"}]
+                    }
+                }
+            },
+            "included": [
+                {
+                    "id": "r0",
+                    "type": "search-result",
+                    "relationships": {
+                        "indexCard": {"data": {"id": "c0", "type": "index-card"}}
+                    },
+                },
+                {
+                    "id": "c0",
+                    "type": "index-card",
+                    "attributes": {
+                        "resourceMetadata": {"@id": "https://example.org/x"}
+                    },
+                },
+            ],
+        }
+        with pytest.raises(APIError):
+            _share_result_ids(payload)
+
+
+class TestShareSearchParams:
+    def test_restricts_to_osf_preprints(self):
+        params = _share_search_params("memory", 20)
+        assert params["cardSearchText"] == "memory"
+        assert params["cardSearchFilter[resourceType]"] == "Preprint"
+        assert params["cardSearchFilter[accessService]"] == "https://osf.io"
+        assert params["page[size]"] == 20
+        assert "cardSearchFilter[publisher]" not in params
+
+    def test_provider_maps_to_publisher_filter(self):
+        params = _share_search_params("memory", 5, provider="psyarxiv")
+        assert (
+            params["cardSearchFilter[publisher]"] == "https://osf.io/preprints/psyarxiv"
+        )
+
+
+class TestRankByShareOrder:
+    def test_versioned_ids_follow_share_rank(self):
+        # Live v2 records carry version suffixes and arrive unordered.
+        items = [{"id": "9fe8n_v1"}, {"id": "zzzzz_v1"}, {"id": "g6dhv_v2"}]
+        ranked = _rank_by_share_order(items, ["g6dhv", "9fe8n"])
+        assert [i["id"] for i in ranked] == ["g6dhv_v2", "9fe8n_v1", "zzzzz_v1"]
+
+
+@pytest.mark.integration
+class TestOSFSearchLive:
+    """Live search through SHARE + the OSF v2 API (no key required)."""
+
+    async def test_search_returns_ranked_osf_preprints(self):
+        async with OSFClient(Config()) as client:
+            papers = await client.search("working memory training", max_results=5)
+        assert 0 < len(papers) <= 5
+        assert all(any(s.startswith("osf:") for s in p.data_sources) for p in papers)
+        assert any("memory" in p.title.lower() for p in papers)
+
+    async def test_provider_filter_restricts_results(self):
+        async with OSFClient(Config()) as client:
+            papers = await client.search(
+                "inequality", max_results=5, provider="socarxiv"
+            )
+        assert papers
+        assert all("osf:socarxiv" in p.data_sources for p in papers)
+
+
 class TestOSFNetwork:
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_search_returns_papers(self):
-        respx.get(f"{_BASE}/v2/preprints/").mock(
-            return_value=httpx.Response(200, json={"data": [_OSF_ITEM]})
-        )
-        async with OSFClient(Config()) as client:
-            papers = await client.search("working memory")
-        assert len(papers) == 1
-        assert papers[0].ids.doi == "10.31234/osf.io/abc12"
-
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_search_provider_filter_added(self):
-        """`provider=` arg lands as `filter[provider]` in the query string."""
-        route = respx.get(f"{_BASE}/v2/preprints/").mock(
-            return_value=httpx.Response(200, json={"data": []})
-        )
-        async with OSFClient(Config()) as client:
-            await client.search("memory", provider="psyarxiv")
-        # The captured request URL contains the filter parameter.
-        assert route.called
-        request = route.calls.last.request
-        assert "filter%5Bprovider%5D=psyarxiv" in str(request.url) or (
-            "filter[provider]=psyarxiv" in str(request.url)
-        )
-
     @pytest.mark.asyncio
     @respx.mock
     async def test_lookup_doi_routes_to_filter(self):

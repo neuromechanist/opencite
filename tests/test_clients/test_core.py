@@ -8,6 +8,7 @@ import respx
 
 from opencite.clients.core import COREClient, _parse_work
 from opencite.config import Config
+from opencite.exceptions import APIKeyError
 
 _BASE = "https://api.core.ac.uk"
 
@@ -143,3 +144,9 @@ class TestCoreSearchRedirect:
         async with COREClient(Config(core_api_key="k")) as client:
             resp = await client.get("/v3/search/works", params={"q": "x"})
         assert resp.status_code == 200
+
+
+async def test_search_without_key_raises():
+    async with COREClient(Config(core_api_key="")) as client:
+        with pytest.raises(APIKeyError):
+            await client.search("memory")

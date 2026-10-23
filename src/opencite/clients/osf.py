@@ -6,6 +6,10 @@ MetaArXiv, etc. The provider slug is captured in `data_sources` as
 ``osf:{provider}`` so attribution stays specific without bloating the
 canonical `--source` matrix.
 
+The v2 preprints endpoint has no free-text filter, so keyword search goes
+through SHARE (`share.osf.io/api/v3/index-card-search`), the index behind
+osf.io search, and the ranked hits are hydrated from the v2 endpoint.
+
 API docs: https://developer.osf.io/#operation/preprints_list
 No API key required for public preprints.
 """
@@ -26,6 +30,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.osf.io"
+SHARE_SEARCH_URL = "https://share.osf.io/api/v3/index-card-search"
+_OSF_ORIGIN = "https://osf.io"
+_PAGE_SIZE_CAP = 100
+
+# OSF preprint IDs carry a version suffix in the v2 API (``abc12_v2``).
+_VERSION_SUFFIX = re.compile(r"_v\d+$")
+# SHARE identifies OSF resources by URL, e.g. ``https://osf.io/abc12``.
+_OSF_RESOURCE_URL = re.compile(r"^https?://osf\.io/([A-Za-z0-9]+)/?$")
 
 # OSF preprints span several DataCite prefixes per provider:
 # 10.31234/osf.io/ -- PsyArXiv
@@ -69,32 +81,26 @@ class OSFClient(PreprintClient):
         """Search OSF Preprints by query string.
 
         Args:
-            query: Free-text search across title and abstract.
+            query: Free-text search across title, abstract, and contributors.
             max_results: Maximum results to return (page size).
             provider: Optional provider slug (e.g. ``"psyarxiv"``,
                 ``"socarxiv"``) to filter results to one OSF preprint server.
         """
-        params: dict[str, Any] = {
-            "filter[q]": query,
-            "page[size]": min(max_results, 100),
-        }
-        if provider:
-            params["filter[provider]"] = provider
-
-        try:
-            resp = await self.get("/v2/preprints/", params=params)
-        except APIError as e:
-            logger.warning("OSF search failed for query %r: %s", query, e.message)
+        size = min(max_results, _PAGE_SIZE_CAP)
+        resp = await self.get(
+            SHARE_SEARCH_URL, params=_share_search_params(query, size, provider)
+        )
+        ranked_ids = _share_result_ids(resp.json())
+        if not ranked_ids:
             return []
 
-        try:
-            data = resp.json()
-        except ValueError:
-            logger.warning("OSF search returned non-JSON for query %r", query)
-            return []
-
+        resp = await self.get(
+            "/v2/preprints/",
+            params={"filter[id]": ",".join(ranked_ids), "page[size]": size},
+        )
+        items = _rank_by_share_order(resp.json().get("data") or [], ranked_ids)
         papers: list[Paper] = []
-        for item in data.get("data") or []:
+        for item in items:
             paper = self._parse_item(item)
             if paper is not None:
                 papers.append(paper)
@@ -227,3 +233,76 @@ class OSFClient(PreprintClient):
     def is_osf_doi(doi: str) -> bool:
         """Return True if *doi* points to an OSF-hosted preprint."""
         return bool(_OSF_DOI_PATTERN.match(doi.strip()))
+
+
+def _share_search_params(
+    query: str, size: int, provider: str | None = None
+) -> dict[str, Any]:
+    """Query parameters for a SHARE index-card search over OSF preprints."""
+    params: dict[str, Any] = {
+        "cardSearchText": query,
+        "cardSearchFilter[resourceType]": "Preprint",
+        "cardSearchFilter[accessService]": _OSF_ORIGIN,
+        "page[size]": size,
+        "acceptMediatype": "application/vnd.api+json",
+    }
+    if provider:
+        params["cardSearchFilter[publisher]"] = f"{_OSF_ORIGIN}/preprints/{provider}"
+    return params
+
+
+def _rank_by_share_order(
+    items: list[dict[str, Any]], ranked_ids: list[str]
+) -> list[dict[str, Any]]:
+    """Order v2 preprint records by SHARE rank.
+
+    ``filter[id]`` returns records in arbitrary order and with versioned IDs
+    (``abc12_v1``), so the version suffix is stripped before matching.
+    Unranked records go last.
+    """
+    rank = {osf_id: i for i, osf_id in enumerate(ranked_ids)}
+    return sorted(
+        items,
+        key=lambda item: rank.get(
+            _VERSION_SUFFIX.sub("", str(item.get("id", ""))), len(rank)
+        ),
+    )
+
+
+def _share_result_ids(data: dict[str, Any]) -> list[str]:
+    """Extract OSF IDs, in rank order, from a SHARE index-card-search payload.
+
+    The JSON:API payload lists ranked ``search-result`` references under
+    ``data.relationships.searchResultPage``; each points at an ``index-card``
+    in ``included`` whose ``resourceMetadata["@id"]`` is the OSF URL.
+
+    Raises `APIError` when the page has results but none parse to an OSF
+    ID, so a payload shape change surfaces as a failure rather than as an
+    empty result.
+    """
+    included = {
+        (item.get("type"), item.get("id")): item for item in data.get("included") or []
+    }
+    page = (
+        ((data.get("data") or {}).get("relationships") or {}).get("searchResultPage")
+        or {}
+    ).get("data") or []
+
+    ids: list[str] = []
+    for ref in page:
+        result = included.get(("search-result", ref.get("id"))) or {}
+        card_ref = ((result.get("relationships") or {}).get("indexCard") or {}).get(
+            "data"
+        ) or {}
+        card = included.get(("index-card", card_ref.get("id"))) or {}
+        resource_url = (
+            (card.get("attributes") or {}).get("resourceMetadata") or {}
+        ).get("@id") or ""
+        match = _OSF_RESOURCE_URL.match(resource_url)
+        if match and match.group(1) not in ids:
+            ids.append(match.group(1))
+    if page and not ids:
+        raise APIError(
+            f"SHARE returned {len(page)} results but no OSF IDs could be parsed"
+        )
+    return ids
